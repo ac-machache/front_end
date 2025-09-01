@@ -1,103 +1,211 @@
-import Image from "next/image";
+"use client";
+import React, { useMemo, useRef, useState, useCallback } from 'react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
+import type { Config, LogEntry, Session } from '@/lib/types';
+import { LogLevel } from '@/lib/types';
+import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
+import { buildWsUrl } from '@/lib/utils';
+import { useRouter } from 'next/navigation';
+
+type Page = 'config' | 'list' | 'detail';
 
 export default function Home() {
-  return (
-    <div className="font-sans grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20">
-      <main className="flex flex-col gap-[32px] row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="font-mono list-inside list-decimal text-sm/6 text-center sm:text-left">
-          <li className="mb-2 tracking-[-.01em]">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] font-mono font-semibold px-1 py-0.5 rounded">
-              app/page.tsx
-            </code>
-            .
-          </li>
-          <li className="tracking-[-.01em]">
-            Save and see your changes instantly.
-          </li>
-        </ol>
+  const router = useRouter();
+  const [currentPage, setCurrentPage] = useState<Page>('config');
+  const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
+  const [apiResult, setApiResult] = useState<any>(null);
+  const [apiResultTitle, setApiResultTitle] = useState('API Result');
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const logCounter = useRef(0);
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:w-auto"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent font-medium text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 w-full sm:w-auto md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
+  const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
+    setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
+  }, []);
+
+  const wsUrl = useMemo(() => buildWsUrl(config), [config]);
+  const apiClient = useApiClient(config, addLog);
+
+  const handleApiResponse = (title: string, data: any) => {
+    if (!data) return;
+    setApiResultTitle(title);
+    setApiResult(data);
+    if (title.startsWith('Create Session') && data.id) setConfig(prev => ({ ...prev, sessionId: data.id }));
+  };
+
+  const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
+
+  // Bridge sendMessage into audio hook without TDZ
+  const sendMessageRef = useRef<(data: any) => void>(() => {});
+  const onMicData = useCallback((base64: string) => {
+    sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
+  }, []);
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
+
+  const onWsMessage = useCallback((data: any) => {
+    if (data?.event) {
+      addLog(LogLevel.Event, data.event, data.data);
+      return;
+    }
+    if (data?.turn_complete !== undefined || data?.interrupted !== undefined) {
+      addLog(LogLevel.Event, 'Turn Control', data);
+      if (data?.interrupted) clearPlaybackQueue();
+      return;
+    }
+    if (data?.mime_type && data?.data) {
+      if (data.mime_type.startsWith('audio/')) {
+        playAudioChunk(data.data);
+        return;
+      }
+    }
+    addLog(LogLevel.Ws, 'Received unhandled message', data);
+  }, [addLog, playAudioChunk, clearPlaybackQueue]);
+
+  const onWsClose = useCallback((code?: number, reason?: string) => {
+    addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
+    if (isMicOn) { stopMic(); setIsMicOn(false); }
+  }, [addLog, isMicOn, stopMic]);
+  const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
+  const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
+  React.useEffect(() => { sendMessageRef.current = (data: any) => sendMessage(data); }, [sendMessage]);
+
+  const handleGoToSession = (sessionId: string) => {
+    setConfig(prev => ({ ...prev, sessionId }));
+    setApiResult(null);
+    router.push(`/session/${sessionId}`);
+  };
+
+  const create = async (fields: { nom_tc?: string; nom_agri?: string }) => {
+    const result = await apiClient.createSession({ nom_tc: fields.nom_tc || '', nom_agri: fields.nom_agri || '' }) as Session | null;
+    handleApiResponse('Create Session (Auto-ID)', result);
+    if (result?.id) handleGoToSession(result.id);
+  };
+
+  const formatTs = (ts?: string) => {
+    if (!ts) return 'N/A';
+    const n = typeof ts === 'string' ? parseFloat(ts) : Number(ts);
+    if (!isFinite(n)) return ts;
+    const d = new Date(n * 1000);
+    return d.toLocaleString();
+  };
+
+  if (currentPage === 'config') {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-screen">
+        <div className="text-center mb-8">
+          <h1 className="text-4xl font-bold">Audio Service Tester</h1>
+          <p className="text-muted-foreground mt-2">Configure your connection details to begin.</p>
         </div>
-      </main>
-      <footer className="row-start-3 flex gap-[24px] flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+        <Card className="w-full max-w-2xl">
+          <CardHeader>
+            <CardTitle>Configuration</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                  <Label htmlFor="scheme">Scheme</Label>
+                  <select id="scheme" name="scheme" value={config.scheme} onChange={(e) => setConfig(prev => ({ ...prev, scheme: e.target.value as Config['scheme'] }))} className="mt-1 block w-full bg-background border border-input rounded-md px-3 py-2 text-sm">
+                    <option value="wss">wss</option>
+                    <option value="ws">ws</option>
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="host">Host</Label>
+                  <Input id="host" value={config.host} onChange={(e) => setConfig(prev => ({ ...prev, host: e.target.value }))} className="mt-1" />
+                </div>
+                <div>
+                  <Label htmlFor="port">Port</Label>
+                  <Input id="port" value={config.port} onChange={(e) => setConfig(prev => ({ ...prev, port: e.target.value }))} className="mt-1" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="appName">App Name</Label>
+                  <Input id="appName" value={config.appName} onChange={(e) => setConfig(prev => ({ ...prev, appName: e.target.value }))} className="mt-1" />
+                </div>
+                <div>
+                  <Label htmlFor="userId">User ID</Label>
+                  <Input id="userId" value={config.userId} onChange={(e) => setConfig(prev => ({ ...prev, userId: e.target.value }))} className="mt-1" />
+                </div>
+              </div>
+              <Button className="w-full" onClick={() => setCurrentPage('list')}>Start Session</Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-6xl mx-auto p-4">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-semibold">Audio Service Tester</h1>
+          <p className="text-muted-foreground">{currentPage === 'list' ? 'Manage your sessions.' : `Interacting with Session: ${config.sessionId}`}</p>
+        </div>
+        <Button variant="secondary" onClick={() => setCurrentPage('config')}>Change Configuration</Button>
+      </div>
+      <div className="grid grid-cols-12 gap-4 mt-4">
+        <div className="col-span-12 md:col-span-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div>
+                  <Label>Nom TC</Label>
+                  <Input id="nom_tc" placeholder="e.g. Jean Dupont" className="mt-1" onChange={(e) => (window as any)._nom_tc = e.target.value} />
+                </div>
+                <div>
+                  <Label>Nom Agri</Label>
+                  <Input id="nom_agri" placeholder="e.g. Marie Martin" className="mt-1" onChange={(e) => (window as any)._nom_agri = e.target.value} />
+                </div>
+                <Button className="w-full" onClick={() => create({ nom_tc: (window as any)._nom_tc, nom_agri: (window as any)._nom_agri })}>Create</Button>
+                <Button className="w-full" onClick={async () => handleApiResponse('Session List', await apiClient.listSessions())}>List Sessions</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+        <div className="col-span-12 md:col-span-8">
+          <Card>
+            <CardHeader>
+              <CardTitle>{apiResultTitle}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {Array.isArray(apiResult) ? (
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Session ID</TableHead>
+                      <TableHead>Last Update Time</TableHead>
+                      <TableHead className="text-right">Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {apiResult.map((s: any) => (
+                      <TableRow key={s.id}>
+                        <TableCell className="font-mono">{s.id}</TableCell>
+                        <TableCell className="font-mono">{formatTs(s.lastUpdateTime)}</TableCell>
+                        <TableCell className="text-right">
+                          <Button size="sm" variant="secondary" onClick={() => handleGoToSession(s.id)}>Select</Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              ) : (
+                <pre className="text-sm whitespace-pre-wrap break-all">{apiResult ? JSON.stringify(apiResult, null, 2) : 'No data to display.'}</pre>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </div>
   );
 }

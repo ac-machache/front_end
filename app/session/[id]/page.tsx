@@ -1,0 +1,113 @@
+"use client";
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useParams, useRouter } from 'next/navigation';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import type { Config, LogEntry } from '@/lib/types';
+import { LogLevel } from '@/lib/types';
+import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
+import { buildWsUrl } from '@/lib/utils';
+
+export default function SessionDetail() {
+  const params = useParams<{ id: string }>();
+  const router = useRouter();
+  const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
+  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [isMicOn, setIsMicOn] = useState(false);
+  const logCounter = useRef(0);
+
+  // Ensure sessionId matches URL
+  React.useEffect(() => {
+    const id = params?.id as string;
+    if (id && config.sessionId !== id) setConfig(prev => ({ ...prev, sessionId: id }));
+  }, [params?.id]);
+
+  const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
+    setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
+  }, []);
+
+  const wsUrl = useMemo(() => buildWsUrl(config), [config]);
+  const apiClient = useApiClient(config, addLog);
+
+  const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
+
+  // Bridge sendMessage to audio hook without TDZ issues
+  const sendMessageRef = useRef<(data: any) => void>(() => {});
+  const onMicData = useCallback((base64: string) => {
+    sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
+  }, []);
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
+
+  const onWsMessage = useCallback((data: any) => {
+    if (data?.event) {
+      addLog(LogLevel.Event, data.event, data.data);
+      return;
+    }
+    if (data?.turn_complete !== undefined || data?.interrupted !== undefined) {
+      addLog(LogLevel.Event, 'Turn Control', data);
+      if (data?.interrupted) {
+        clearPlaybackQueue();
+      }
+      return;
+    }
+    if (data?.mime_type && data?.data) {
+      if (data.mime_type.startsWith('audio/')) {
+        playAudioChunk(data.data);
+        return;
+      }
+    }
+    addLog(LogLevel.Ws, 'Received unhandled message', data);
+  }, [addLog, playAudioChunk, clearPlaybackQueue]);
+  const onWsClose = useCallback((code?: number, reason?: string) => {
+    addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
+    if (isMicOn) { stopMic(); setIsMicOn(false); }
+  }, [addLog, isMicOn, stopMic]);
+  const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
+  const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
+
+  // Keep ref in sync once hook returns sendMessage
+  React.useEffect(() => {
+    sendMessageRef.current = (data: any) => sendMessage(data);
+  }, [sendMessage]);
+
+  // Manual connect only via UI controls to avoid auto-reconnect behavior
+
+  return (
+    <div className="max-w-6xl mx-auto p-4 space-y-4">
+      <div className="flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-semibold">Session {config.sessionId}</h1>
+          <p className="text-muted-foreground">Connect and stream audio in real-time.</p>
+        </div>
+        <Button variant="secondary" onClick={() => router.push('/')}>Change Configuration</Button>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Realtime Connection</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex gap-2">
+            <Button onClick={connect}>Connect</Button>
+            <Button variant="secondary" onClick={disconnect}>Disconnect</Button>
+            <Button onClick={() => { isMicOn ? (stopMic(), setIsMicOn(false)) : (startMic(), setIsMicOn(true)); }}>
+              {isMicOn ? 'Stop Mic' : 'Start Mic'}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>Logs</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="h-64 overflow-auto text-xs font-mono space-y-1">
+            {logs.map(l => (
+              <div key={l.id} className="flex gap-2"><span className="text-muted-foreground">{l.timestamp}</span><span>[{l.level}]</span><span className="break-all">{l.message}</span></div>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
