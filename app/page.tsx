@@ -18,11 +18,11 @@ type Page = 'config' | 'list' | 'detail';
 export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const [currentPage, setCurrentPage] = useState<Page>(() => (typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('page') === 'list' ? 'list' : 'config'));
+  const [currentPage, setCurrentPage] = useState<Page>('config');
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'ws', host: 'localhost', port: '8080', appName: 'app', userId: 'user', sessionId: '' });
   const [environment, setEnvironment] = useLocalStorage<'local' | 'cloud'>('app-environment', 'local');
   const [apiResult, setApiResult] = useState<any>(null); // Sessions list or other API responses
-  const [apiResultTitle, setApiResultTitle] = useState('API Result');
+  const [apiResultTitle, setApiResultTitle] = useState('Espace session');
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -142,15 +142,15 @@ export default function Home() {
   // Honor page query param so back button goes to list when expected
   React.useEffect(() => {
     const p = searchParams?.get('page');
-    if (p === 'list' && currentPage !== 'list') setCurrentPage('list');
-  }, [searchParams, currentPage]);
+    if (p === 'list') setCurrentPage('list');
+  }, [searchParams]);
 
   if (currentPage === 'config') {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold">IAdvisor</h1>
-          <p className="text-muted-foreground mt-2">Veuillez Choisir un agri .</p>
+          <p className="text-muted-foreground mt-2">Veuillez choisir un agriculteur.</p>
         </div>
         <Card className="w-full max-w-2xl">
           <CardHeader>
@@ -183,7 +183,7 @@ export default function Home() {
                   </div>
                 </div>
               )}
-              <Button className="w-full" onClick={() => { setCurrentPage('list'); router.replace('/?page=list'); }}>Connect</Button>
+              <Button className="w-full" onClick={() => { setCurrentPage('list'); router.replace('/?page=list'); }}>Continuer</Button>
             </div>
           </CardContent>
         </Card>
@@ -195,10 +195,10 @@ export default function Home() {
     <div className="max-w-6xl mx-auto p-4">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-2xl font-semibold">Audio Service Tester</h1>
-          <p className="text-muted-foreground">{currentPage === 'list' ? 'Manage your sessions.' : `Interacting with Session: ${config.sessionId}`}</p>
+          <h1 className="text-2xl font-semibold">IAdvisor</h1>
+          <p className="text-muted-foreground">{currentPage === 'list' ? 'Gérez vos sessions.' : `Session en cours : ${config.sessionId}`}</p>
         </div>
-        <Button variant="secondary" onClick={() => setCurrentPage('config')}>Change Configuration</Button>
+        <Button variant="secondary" onClick={() => setCurrentPage('config')}>Modifier la configuration</Button>
       </div>
       <div className="grid grid-cols-12 gap-4 mt-4">
         <div className="col-span-12 md:col-span-4 space-y-4">
@@ -251,47 +251,64 @@ export default function Home() {
             </CardHeader>
             <CardContent>
               {isLoadingSession && (
-                <div className="text-sm text-muted-foreground">Loading session...</div>
+                <div className="text-sm text-muted-foreground">Chargement de la session…</div>
               )}
               {!isLoadingSession && !selectedSession && (
-                <div className="text-sm text-muted-foreground">Select a session to view its details.</div>
+                <div className="text-sm text-muted-foreground">Sélectionnez une session pour afficher ses détails.</div>
               )}
               {!isLoadingSession && selectedSession && (
                 <div className="space-y-4">
                   {selectedSession?.state?.RapportDeSortie ? (
-                    <div className="space-y-4">
-                      {/* Main report */}
+                    <div className="space-y-6">
+                      {/* Rapport principal */}
                       <div>
-                        <h3 className="text-lg font-semibold">Main Report</h3>
+                        <h3 className="text-lg font-semibold">Rapport principal</h3>
                         <Separator className="my-2" />
                         <div className="space-y-1 text-sm">
-                          <div><span className="font-medium">Title:</span> {selectedSession.state.RapportDeSortie.main_report?.title}</div>
-                          <div><span className="font-medium">Date:</span> {selectedSession.state.RapportDeSortie.main_report?.date_of_visit}</div>
-                          <div><span className="font-medium">Farmer:</span> {selectedSession.state.RapportDeSortie.main_report?.farmer}</div>
-                          <div><span className="font-medium">TC:</span> {selectedSession.state.RapportDeSortie.main_report?.tc}</div>
-                          <div className="whitespace-pre-wrap"><span className="font-medium">Summary:</span> {selectedSession.state.RapportDeSortie.main_report?.report_summary}</div>
+                          <div><span className="font-medium">Titre :</span> {selectedSession.state.RapportDeSortie.main_report?.title}</div>
+                          <div><span className="font-medium">Date :</span> {selectedSession.state.RapportDeSortie.main_report?.date_of_visit}</div>
+                          <div><span className="font-medium">Agriculteur :</span> {selectedSession.state.RapportDeSortie.main_report?.farmer}</div>
+                          <div><span className="font-medium">TC :</span> {selectedSession.state.RapportDeSortie.main_report?.tc}</div>
+                          <div className="whitespace-pre-wrap"><span className="font-medium">Résumé :</span> {selectedSession.state.RapportDeSortie.main_report?.report_summary}</div>
                         </div>
                       </div>
 
-                      {/* Strategic dashboard (optional) */}
+                      {/* Tableau de bord stratégique */}
                       {selectedSession.state.RapportDeSortie.strategic_dashboard && (
-                        <div className="space-y-3">
-                          <h3 className="text-lg font-semibold">Strategic Dashboard</h3>
+                        <div className="space-y-5">
+                          <h3 className="text-lg font-semibold">Tableau de bord stratégique</h3>
                           <Separator className="my-2" />
+
+                          {/* Synthèse proactive */}
                           {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights && (
-                            <div>
-                              <h4 className="font-medium">Proactive Insights</h4>
-                              <ul className="list-disc pl-5 text-sm space-y-1">
-                                {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
-                                  <li key={`pi-ii-${idx}`}>{i}</li>
-                                ))}
-                              </ul>
+                            <div className="space-y-2">
+                              <h4 className="font-medium">Synthèse proactive</h4>
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                <div>
+                                  <div className="text-sm font-medium mb-1">Points identifiés</div>
+                                  <ul className="list-disc pl-5 text-sm space-y-1">
+                                    {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
+                                      <li key={`pi-ii-${idx}`}>{i}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                                <div>
+                                  <div className="text-sm font-medium mb-1">Pistes/solutions</div>
+                                  <ul className="list-disc pl-5 text-sm space-y-1">
+                                    {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
+                                      <li key={`pi-ps-${idx}`}>{i}</li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              </div>
                             </div>
                           )}
+
+                          {/* Plan d'action */}
                           {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
-                                <h4 className="font-medium">Actions for TC</h4>
+                                <h4 className="font-medium">Plan d'action – TC</h4>
                                 <ul className="list-disc pl-5 text-sm space-y-1">
                                   {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
                                     <li key={`ap-tc-${idx}`}>{i}</li>
@@ -299,7 +316,7 @@ export default function Home() {
                                 </ul>
                               </div>
                               <div>
-                                <h4 className="font-medium">Actions for Farmer</h4>
+                                <h4 className="font-medium">Plan d'action – Agriculteur</h4>
                                 <ul className="list-disc pl-5 text-sm space-y-1">
                                   {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
                                     <li key={`ap-farmer-${idx}`}>{i}</li>
@@ -308,13 +325,117 @@ export default function Home() {
                               </div>
                             </div>
                           )}
+
+                          {/* Détecteur d'opportunités */}
+                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <h4 className="font-medium">Opportunités (ventes)</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.map((i: string, idx: number) => (
+                                    <li key={`od-sales-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Conseils</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.map((i: string, idx: number) => (
+                                    <li key={`od-adv-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Projets agriculteur</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
+                                    <li key={`od-fp-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Analyse des risques */}
+                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <h4 className="font-medium">Risque commercial</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.map((i: string, idx: number) => (
+                                    <li key={`risk-com-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Risque technique</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.map((i: string, idx: number) => (
+                                    <li key={`risk-tech-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Signaux faibles</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.map((i: string, idx: number) => (
+                                    <li key={`risk-ws-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Baromètre de la relation */}
+                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer && (
+                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div>
+                                <h4 className="font-medium">Points de satisfaction</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
+                                    <li key={`rel-sat-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Points de frustration</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
+                                    <li key={`rel-frus-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Notes personnelles</h4>
+                                <ul className="list-disc pl-5 text-sm space-y-1">
+                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
+                                    <li key={`rel-notes-${idx}`}>{i}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Préparation du prochain contact */}
+                          {selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep && (
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              <div>
+                                <h4 className="font-medium">Sujet d'ouverture</h4>
+                                <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
+                              </div>
+                              <div>
+                                <h4 className="font-medium">Objectif de la prochaine visite</h4>
+                                <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective}</p>
+                              </div>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="text-sm">Session not finished yet. No generated report was found.</div>
-                      <Button onClick={() => handleGoToSession(selectedSession.id)}>Open Realtime</Button>
+                      <div className="text-sm">La session n'est pas terminée. Aucun rapport généré pour l'instant.</div>
+                      <Button onClick={() => handleGoToSession(selectedSession.id)}>Ouvrir le temps réel</Button>
                     </div>
                   )}
                 </div>

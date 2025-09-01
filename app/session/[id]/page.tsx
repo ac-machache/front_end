@@ -3,6 +3,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
@@ -36,13 +37,27 @@ export default function SessionDetail() {
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const [micLevel, setMicLevel] = useState(0);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog, (lvl) => setMicLevel(lvl));
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
   const [prompterLine, setPrompterLine] = useState<string>('');
+  const [toolLabel, setToolLabel] = useState<string>('');
 
   const onWsMessage = useCallback((data: any) => {
     if (data?.event) {
-      addLog(LogLevel.Event, data.event, data.data);
+      // Handle function call/response indicators
+      const name: string = (data?.name || '') as string;
+      const lower = name.toLowerCase();
+      if (data.event === 'function_call') {
+        if (lower.includes('topicclarifier')) setToolLabel('Thinking…');
+        else if (lower.includes('resport') || lower.includes('reportsynth') || lower.includes('report')) setToolLabel('Generating report…');
+        else if (lower.includes('memorymanager')) setToolLabel('Updating memory…');
+        else if (lower.includes('search_memories')) {
+          // ignore surface indicator for search_memories
+        }
+      } else if (data.event === 'function_response') {
+        // Clear indicator when a tool finishes
+        setToolLabel('');
+      }
+      addLog(LogLevel.Event, data.event, data.name || data.data);
       return;
     }
     if (data?.turn_complete !== undefined || data?.interrupted !== undefined) {
@@ -50,11 +65,17 @@ export default function SessionDetail() {
       if (data?.interrupted) {
         clearPlaybackQueue();
       }
+      setToolLabel('');
       return;
     }
     if (data?.mime_type && data?.data) {
       if (data.mime_type.startsWith('audio/')) {
         playAudioChunk(data.data);
+        return;
+      }
+      if (typeof data.data === 'string' && data.mime_type === 'text/plain') {
+        // Only show model text/plain (partials replace)
+        setPrompterLine(data.data);
         return;
       }
     }
@@ -80,9 +101,9 @@ export default function SessionDetail() {
       <div className="flex-shrink-0 flex justify-between items-center mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Session {config.sessionId}</h1>
-          <p className="text-muted-foreground">Connect and stream audio in real-time.</p>
+          <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
         </div>
-        <Button variant="secondary" onClick={() => router.replace('/?page=list')}>Back to Sessions</Button>
+        <Button variant="secondary" onClick={() => router.replace('/?page=list')}>Retour aux sessions</Button>
       </div>
 
       <div className="flex-grow overflow-hidden">
@@ -90,32 +111,23 @@ export default function SessionDetail() {
           <div className="col-span-4 h-full">
             <Card className="h-full">
               <CardHeader>
-                <CardTitle>Interesting Events</CardTitle>
+                <CardTitle>Événements</CardTitle>
               </CardHeader>
               <CardContent className="overflow-hidden h-[calc(100%-3rem)] flex flex-col gap-4">
-                {/* Mic waveform style bar */}
-                <div className="h-24 bg-muted rounded-md flex items-end p-2">
-                  <div
-                    className="w-full bg-primary/80 transition-[height] duration-75 rounded-sm"
-                    style={{ height: `${Math.max(4, micLevel * 100)}%` }}
-                    aria-label="mic-level"
-                  />
-                </div>
-
+                {/* Tool status */}
+                {toolLabel && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    <span>{toolLabel}</span>
+                  </div>
+                )}
                 {/* TV prompter style current line */}
-                <div className="flex-1 overflow-hidden bg-background border rounded-md p-4">
+                <div className="flex-1 overflow-auto bg-background border rounded-md p-4">
                   <div className="h-full w-full overflow-hidden">
-                    <p className="text-2xl leading-relaxed tracking-wide font-medium whitespace-pre-wrap">
+                    <p className="text-base md:text-lg leading-relaxed tracking-wide whitespace-pre-wrap">
                       {prompterLine || 'Awaiting transcription...'}
                     </p>
                   </div>
-                </div>
-
-                {/* Placeholder actions for demo: update prompter */}
-                <div className="flex gap-2">
-                  <Button size="sm" variant="secondary" onClick={() => setPrompterLine('Bonjour Sarah, voici la synthèse en cours...')}>Mock Line 1</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setPrompterLine('Le modèle réfléchit: opportunité engrais azoté, prix sensible...')}>Mock Line 2</Button>
-                  <Button size="sm" variant="secondary" onClick={() => setPrompterLine('Conclusion: plan d’action envoyé; suivi sous 15 jours.')}>Mock Line 3</Button>
                 </div>
               </CardContent>
             </Card>
