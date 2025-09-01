@@ -3,7 +3,9 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
+import AIVoice from '@/components/kokonutui/ai-voice';
+// removed Loader2-based status row in events panel
+import AITextLoading from '@/components/kokonutui/ai-text-loading';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
@@ -15,6 +17,7 @@ export default function SessionDetail() {
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
+  const [isHydrated, setIsHydrated] = useState(false);
   const logCounter = useRef(0);
 
   // Ensure sessionId matches URL
@@ -22,6 +25,10 @@ export default function SessionDetail() {
     const id = params?.id as string;
     if (id && config.sessionId !== id) setConfig(prev => ({ ...prev, sessionId: id }));
   }, [params?.id]);
+
+  React.useEffect(() => {
+    setIsHydrated(true);
+  }, []);
 
   const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
     setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
@@ -38,24 +45,44 @@ export default function SessionDetail() {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
   const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
-  const [prompterLine, setPrompterLine] = useState<string>('');
+  // Transcription display disabled for now
   const [toolLabel, setToolLabel] = useState<string>('');
+  const [partialBuffer, setPartialBuffer] = useState<string>('');
+  const [toolFeed, setToolFeed] = useState<string[]>([]); // rotating feed for AITextLoading
+  type Mode = 'idle' | 'listening' | 'speaking' | 'thinking';
+  const [mode, setMode] = useState<Mode>('idle');
+  const speakTimerRef = useRef<number | null>(null);
+  const prevModeRef = useRef<Mode>('idle');
 
   const onWsMessage = useCallback((data: any) => {
     if (data?.event) {
       // Handle function call/response indicators
       const name: string = (data?.name || '') as string;
       const lower = name.toLowerCase();
+      const labelFor = (toolLower: string, original: string) => {
+        if (toolLower.includes('topicclarifier')) return 'Réflexion en cours…';
+        if (toolLower.includes('resport') || toolLower.includes('reportsynth') || toolLower.includes('report')) return 'Génération du rapport…';
+        if (toolLower.includes('memorymanager')) return 'Mise à jour de la mémoire…';
+        if (toolLower.includes('search_memories')) return 'Recherche en mémoire…';
+        return `Appel d’outil: ${original || 'inconnu'}`;
+      };
       if (data.event === 'function_call') {
-        if (lower.includes('topicclarifier')) setToolLabel('Thinking…');
-        else if (lower.includes('resport') || lower.includes('reportsynth') || lower.includes('report')) setToolLabel('Generating report…');
-        else if (lower.includes('memorymanager')) setToolLabel('Updating memory…');
-        else if (lower.includes('search_memories')) {
-          // ignore surface indicator for search_memories
-        }
+        const label = labelFor(lower, name);
+        setToolLabel(label);
+        // Do not accumulate feed anymore; just show the current label via mode
+        prevModeRef.current = isMicOn ? 'listening' : 'idle';
+        setMode('thinking');
       } else if (data.event === 'function_response') {
-        // Clear indicator when a tool finishes
+        // Clear indicator when a tool finishes and revert to baseline
         setToolLabel('');
+        // If the model is (or was just) speaking, prefer speaking; otherwise listening/idle
+        if (speakTimerRef.current) {
+          setMode('speaking');
+          window.clearTimeout(speakTimerRef.current);
+          speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 800);
+        } else {
+          setMode(isMicOn ? 'listening' : 'idle');
+        }
       }
       addLog(LogLevel.Event, data.event, data.name || data.data);
       return;
@@ -66,25 +93,40 @@ export default function SessionDetail() {
         clearPlaybackQueue();
       }
       setToolLabel('');
+      // Clear partials at end of turn
+      setPartialBuffer('');
+      setToolFeed([]);
+      // Prefer speaking if audio frames arrived very recently, else listening/idle
+      if (speakTimerRef.current) {
+        setMode('speaking');
+        window.clearTimeout(speakTimerRef.current);
+        speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 800);
+      } else {
+        setMode(isMicOn ? 'listening' : 'idle');
+      }
       return;
     }
     if (data?.mime_type && data?.data) {
       if (data.mime_type.startsWith('audio/')) {
         playAudioChunk(data.data);
+        setMode('speaking');
+        if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
+        speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 1200);
         return;
       }
       if (typeof data.data === 'string' && data.mime_type === 'text/plain') {
-        // Only show model text/plain (partials replace)
-        setPrompterLine(data.data);
+        // skip showing transcription for now
+        setPartialBuffer(data.data);
         return;
       }
     }
     // Do not log unhandled messages
     // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue]);
+  }, [addLog, playAudioChunk, clearPlaybackQueue, isMicOn, mode]);
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
     if (isMicOn) { stopMic(); setIsMicOn(false); }
+    setMode('idle');
   }, [addLog, isMicOn, stopMic]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
@@ -95,12 +137,15 @@ export default function SessionDetail() {
   }, [sendMessage]);
 
   // Manual connect only via UI controls to avoid auto-reconnect behavior
+  React.useEffect(() => {
+    setMode(isMicOn ? 'listening' : 'idle');
+  }, [isMicOn]);
 
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
       <div className="flex-shrink-0 flex justify-between items-center mb-4">
         <div>
-          <h1 className="text-2xl font-semibold">Session {config.sessionId}</h1>
+          <h1 className="text-2xl font-semibold">Session {isHydrated ? (config.sessionId || (params?.id as string) || '') : ''}</h1>
           <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
         </div>
         <Button variant="secondary" onClick={() => router.replace('/?page=list')}>Retour aux sessions</Button>
@@ -114,20 +159,19 @@ export default function SessionDetail() {
                 <CardTitle>Événements</CardTitle>
               </CardHeader>
               <CardContent className="overflow-hidden h-[calc(100%-3rem)] flex flex-col gap-4">
-                {/* Tool status */}
-                {toolLabel && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    <span>{toolLabel}</span>
-                  </div>
-                )}
-                {/* TV prompter style current line */}
+                {/* Events panel now only uses AITextLoading */}
                 <div className="flex-1 overflow-auto bg-background border rounded-md p-4">
-                  <div className="h-full w-full overflow-hidden">
-                    <p className="text-base md:text-lg leading-relaxed tracking-wide whitespace-pre-wrap">
-                      {prompterLine || 'Awaiting transcription...'}
-                    </p>
-                  </div>
+                  <AITextLoading
+                    texts={
+                      mode === 'thinking'
+                        ? [toolLabel || 'Réflexion en cours…']
+                        : mode === 'speaking'
+                          ? ['Synthèse de parole…']
+                          : mode === 'listening'
+                            ? ['À l’écoute']
+                            : ['En attente']
+                    }
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -153,33 +197,60 @@ export default function SessionDetail() {
         </div>
       </div>
 
-      <div className="flex-shrink-0 mt-4">
-        <Card>
-          <CardHeader>
-            <CardTitle>Realtime Connection</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="flex gap-2">
-              <Button
-                onClick={connect}
-                variant={(wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
-                disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting}
-              >
-                Connect
-              </Button>
-              <Button
-                onClick={disconnect}
-                variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
-                disabled={wsStatus !== WsStatus.Connected}
-              >
-                Disconnect
-              </Button>
-              <Button onClick={() => { isMicOn ? (stopMic(), setIsMicOn(false)) : (startMic(), setIsMicOn(true)); }}>
-                {isMicOn ? 'Stop Mic' : 'Start Mic'}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+      <div className="mt-4 grid grid-cols-5 gap-4">
+        {/* Left: Micro panel (same width as Events) */}
+        <div className="col-span-4">
+          <Card>
+            <CardHeader>
+              <CardTitle>Micro</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <AIVoice
+                active={isMicOn}
+                onToggle={(next) => {
+                  if (next) {
+                    startMic();
+                    setIsMicOn(true);
+                    // Default to listening when mic turns on
+                    setMode('listening');
+                  } else {
+                    stopMic();
+                    setIsMicOn(false);
+                    setMode('idle');
+                  }
+                }}
+              />
+            </CardContent>
+          </Card>
+        </div>
+        {/* Right: Connection panel (same width as Logs) */}
+        <div className="col-span-1">
+          <Card className="h-full">
+            <CardHeader>
+              <CardTitle>Connexion</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={connect}
+                  className="w-full"
+                  variant={(wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
+                  disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting}
+                >
+                  Connecter
+                </Button>
+                <Button
+                  onClick={disconnect}
+                  className="w-full"
+                  variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
+                  disabled={wsStatus !== WsStatus.Connected}
+                >
+                  Déconnecter
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       </div>
     </div>
   );
