@@ -17,11 +17,13 @@ export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dis
       return initialValue;
     }
   });
-  const setValue = (value: T | ((val: T) => T)) => {
-    const valueToStore = value instanceof Function ? value(storedValue) : value;
-    setStoredValue(valueToStore);
-    window.localStorage.setItem(key, JSON.stringify(valueToStore));
-  };
+  const setValue = React.useCallback((value: T | ((val: T) => T)) => {
+    setStoredValue(prev => {
+      const nextValue = value instanceof Function ? (value as (val: T) => T)(prev) : value;
+      try { window.localStorage.setItem(key, JSON.stringify(nextValue)); } catch {}
+      return nextValue;
+    });
+  }, [key]);
   return [storedValue, setValue];
 }
 

@@ -16,7 +16,8 @@ type Page = 'config' | 'list' | 'detail';
 export default function Home() {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState<Page>('config');
-  const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
+  const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'ws', host: 'localhost', port: '8080', appName: 'app', userId: 'user', sessionId: '' });
+  const [environment, setEnvironment] = useLocalStorage<'local' | 'cloud'>('app-environment', 'local');
   const [apiResult, setApiResult] = useState<any>(null);
   const [apiResultTitle, setApiResultTitle] = useState('API Result');
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -93,12 +94,27 @@ export default function Home() {
     return d.toLocaleString();
   };
 
+  // Keep config in sync with environment selection
+  React.useEffect(() => {
+    setConfig(prev => {
+      if (environment === 'local') {
+        // For local, we don't need host/port as we use the proxy.
+        // Set sane defaults, but they won't be used for the URL.
+        const next = { ...prev, scheme: 'ws' as const, host: 'localhost', port: '8080', appName: 'app' };
+        return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+      }
+      // For cloud, set a default port but allow user to override host.
+      const next = { ...prev, scheme: 'wss' as const, port: '443', appName: 'app' };
+      return JSON.stringify(next) === JSON.stringify(prev) ? prev : next;
+    });
+  }, [environment, setConfig]);
+
   if (currentPage === 'config') {
     return (
       <div className="flex flex-col items-center justify-center min-h-screen">
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-bold">Audio Service Tester</h1>
-          <p className="text-muted-foreground mt-2">Configure your connection details to begin.</p>
+          <h1 className="text-4xl font-bold">IAdvisor</h1>
+          <p className="text-muted-foreground mt-2">Veuillez Choisir un agri .</p>
         </div>
         <Card className="w-full max-w-2xl">
           <CardHeader>
@@ -106,34 +122,32 @@ export default function Home() {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <Label htmlFor="scheme">Scheme</Label>
-                  <select id="scheme" name="scheme" value={config.scheme} onChange={(e) => setConfig(prev => ({ ...prev, scheme: e.target.value as Config['scheme'] }))} className="mt-1 block w-full bg-background border border-input rounded-md px-3 py-2 text-sm">
-                    <option value="wss">wss</option>
-                    <option value="ws">ws</option>
-                  </select>
-                </div>
-                <div>
-                  <Label htmlFor="host">Host</Label>
-                  <Input id="host" value={config.host} onChange={(e) => setConfig(prev => ({ ...prev, host: e.target.value }))} className="mt-1" />
-                </div>
-                <div>
-                  <Label htmlFor="port">Port</Label>
-                  <Input id="port" value={config.port} onChange={(e) => setConfig(prev => ({ ...prev, port: e.target.value }))} className="mt-1" />
-                </div>
-              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="appName">App Name</Label>
-                  <Input id="appName" value={config.appName} onChange={(e) => setConfig(prev => ({ ...prev, appName: e.target.value }))} className="mt-1" />
+                  <Label htmlFor="environment">Environment</Label>
+                  <select id="environment" name="environment" value={environment} onChange={(e) => setEnvironment(e.target.value as 'local' | 'cloud')} className="mt-1 block w-full bg-background border border-input rounded-md px-3 py-2 text-sm">
+                    <option value="local">Local (Proxied)</option>
+                    <option value="cloud">Cloud Run</option>
+                  </select>
                 </div>
                 <div>
                   <Label htmlFor="userId">User ID</Label>
                   <Input id="userId" value={config.userId} onChange={(e) => setConfig(prev => ({ ...prev, userId: e.target.value }))} className="mt-1" />
                 </div>
               </div>
-              <Button className="w-full" onClick={() => setCurrentPage('list')}>Start Session</Button>
+              {environment === 'cloud' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="cloudHost">Cloud Run Host</Label>
+                    <Input id="cloudHost" placeholder="your-service-xxxx-xx.run.app" value={config.host} onChange={(e) => setConfig(prev => ({ ...prev, host: e.target.value }))} className="mt-1" />
+                  </div>
+                  <div>
+                    <Label htmlFor="cloudPort">Port</Label>
+                    <Input id="cloudPort" value={config.port} onChange={(e) => setConfig(prev => ({ ...prev, port: e.target.value }))} className="mt-1" />
+                  </div>
+                </div>
+              )}
+              <Button className="w-full" onClick={() => setCurrentPage('list')}>Connect</Button>
             </div>
           </CardContent>
         </Card>

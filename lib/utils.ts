@@ -8,12 +8,24 @@ export function cn(...inputs: ClassValue[]) {
 
 // URL helpers
 export function buildHttpUrl(config: Config): string {
+  // If host is localhost, use the Next.js proxy.
+  if (config.host === 'localhost') {
+    return '/api';
+  }
+  // Otherwise, build the full URL for cloud environments.
   const protocol = config.scheme === 'wss' ? 'https' : 'http';
   const port = (protocol === 'https' && config.port === '443') || (protocol === 'http' && config.port === '80') ? '' : `:${config.port}`;
   return `${protocol}://${config.host}${port}`;
 }
 
 export function buildWsUrl(config: Config): string {
+  // If host is localhost, use the Next.js proxy for WebSocket.
+  if (config.host === 'localhost') {
+    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const host = typeof window !== 'undefined' ? window.location.host : ''; // This will be the ngrok host
+    return `${protocol}://${host}/api/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  }
+  // Otherwise, build the full URL for cloud environments.
   const port = (config.scheme === 'wss' && config.port === '443') || (config.scheme === 'ws' && config.port === '80') ? '' : `:${config.port}`;
   return `${config.scheme}://${config.host}${port}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
 }

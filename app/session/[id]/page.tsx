@@ -73,40 +73,50 @@ export default function SessionDetail() {
   // Manual connect only via UI controls to avoid auto-reconnect behavior
 
   return (
-    <div className="max-w-6xl mx-auto p-4 space-y-4">
-      <div className="flex justify-between items-center">
+    <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
+      <div className="flex-shrink-0 flex justify-between items-center mb-4">
         <div>
           <h1 className="text-2xl font-semibold">Session {config.sessionId}</h1>
           <p className="text-muted-foreground">Connect and stream audio in real-time.</p>
         </div>
         <Button variant="secondary" onClick={() => router.push('/')}>Change Configuration</Button>
       </div>
-      <Card>
-        <CardHeader>
-          <CardTitle>Realtime Connection</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex gap-2">
-            <Button onClick={connect}>Connect</Button>
-            <Button variant="secondary" onClick={disconnect}>Disconnect</Button>
-            <Button onClick={() => { isMicOn ? (stopMic(), setIsMicOn(false)) : (startMic(), setIsMicOn(true)); }}>
-              {isMicOn ? 'Stop Mic' : 'Start Mic'}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Logs</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="h-64 overflow-auto text-xs font-mono space-y-1">
-            {logs.map(l => (
-              <div key={l.id} className="flex gap-2"><span className="text-muted-foreground">{l.timestamp}</span><span>[{l.level}]</span><span className="break-all">{l.message}</span></div>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+
+      <div className="flex-grow overflow-hidden">
+        <Card className="h-full flex flex-col">
+          <CardHeader className="flex-shrink-0">
+            <CardTitle>Logs</CardTitle>
+          </CardHeader>
+          <CardContent className="flex-grow overflow-auto">
+            <div className="text-xs font-mono space-y-1 pr-2">
+              {logs.map(l => (
+                <div key={l.id} className="flex gap-2 items-start">
+                  <span className="text-muted-foreground whitespace-nowrap">{l.timestamp}</span>
+                  <span className="font-bold">[{l.level}]</span>
+                  <span className="break-all whitespace-pre-wrap">{l.message}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <div className="flex-shrink-0 mt-4">
+        <Card>
+          <CardHeader>
+            <CardTitle>Realtime Connection</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="flex gap-2">
+              <Button onClick={connect}>Connect</Button>
+              <Button variant="secondary" onClick={disconnect}>Disconnect</Button>
+              <Button onClick={() => { isMicOn ? (stopMic(), setIsMicOn(false)) : (startMic(), setIsMicOn(true)); }}>
+                {isMicOn ? 'Stop Mic' : 'Start Mic'}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }
