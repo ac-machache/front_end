@@ -4,7 +4,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import type { Config, LogEntry } from '@/lib/types';
-import { LogLevel } from '@/lib/types';
+import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
 import { buildWsUrl } from '@/lib/utils';
 
@@ -36,7 +36,9 @@ export default function SessionDetail() {
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
+  const [micLevel, setMicLevel] = useState(0);
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog, (lvl) => setMicLevel(lvl));
+  const [prompterLine, setPrompterLine] = useState<string>('');
 
   const onWsMessage = useCallback((data: any) => {
     if (data?.event) {
@@ -56,7 +58,8 @@ export default function SessionDetail() {
         return;
       }
     }
-    addLog(LogLevel.Ws, 'Received unhandled message', data);
+    // Do not log unhandled messages
+    // addLog(LogLevel.Ws, 'Received unhandled message', data);
   }, [addLog, playAudioChunk, clearPlaybackQueue]);
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
@@ -79,26 +82,63 @@ export default function SessionDetail() {
           <h1 className="text-2xl font-semibold">Session {config.sessionId}</h1>
           <p className="text-muted-foreground">Connect and stream audio in real-time.</p>
         </div>
-        <Button variant="secondary" onClick={() => router.push('/')}>Change Configuration</Button>
+        <Button variant="secondary" onClick={() => router.replace('/?page=list')}>Back to Sessions</Button>
       </div>
 
       <div className="flex-grow overflow-hidden">
-        <Card className="h-full flex flex-col">
-          <CardHeader className="flex-shrink-0">
-            <CardTitle>Logs</CardTitle>
-          </CardHeader>
-          <CardContent className="flex-grow overflow-auto">
-            <div className="text-xs font-mono space-y-1 pr-2">
-              {logs.map(l => (
-                <div key={l.id} className="flex gap-2 items-start">
-                  <span className="text-muted-foreground whitespace-nowrap">{l.timestamp}</span>
-                  <span className="font-bold">[{l.level}]</span>
-                  <span className="break-all whitespace-pre-wrap">{l.message}</span>
+        <div className="grid grid-cols-5 gap-4 h-full">
+          <div className="col-span-4 h-full">
+            <Card className="h-full">
+              <CardHeader>
+                <CardTitle>Interesting Events</CardTitle>
+              </CardHeader>
+              <CardContent className="overflow-hidden h-[calc(100%-3rem)] flex flex-col gap-4">
+                {/* Mic waveform style bar */}
+                <div className="h-24 bg-muted rounded-md flex items-end p-2">
+                  <div
+                    className="w-full bg-primary/80 transition-[height] duration-75 rounded-sm"
+                    style={{ height: `${Math.max(4, micLevel * 100)}%` }}
+                    aria-label="mic-level"
+                  />
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+
+                {/* TV prompter style current line */}
+                <div className="flex-1 overflow-hidden bg-background border rounded-md p-4">
+                  <div className="h-full w-full overflow-hidden">
+                    <p className="text-2xl leading-relaxed tracking-wide font-medium whitespace-pre-wrap">
+                      {prompterLine || 'Awaiting transcription...'}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Placeholder actions for demo: update prompter */}
+                <div className="flex gap-2">
+                  <Button size="sm" variant="secondary" onClick={() => setPrompterLine('Bonjour Sarah, voici la synthèse en cours...')}>Mock Line 1</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setPrompterLine('Le modèle réfléchit: opportunité engrais azoté, prix sensible...')}>Mock Line 2</Button>
+                  <Button size="sm" variant="secondary" onClick={() => setPrompterLine('Conclusion: plan d’action envoyé; suivi sous 15 jours.')}>Mock Line 3</Button>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+          <div className="col-span-1 h-full">
+            <Card className="h-full flex flex-col">
+              <CardHeader className="flex-shrink-0">
+                <CardTitle>Logs</CardTitle>
+              </CardHeader>
+              <CardContent className="flex-grow overflow-auto">
+                <div className="text-xs font-mono space-y-1 pr-2">
+                  {logs.map(l => (
+                    <div key={l.id} className="flex gap-2 items-start">
+                      <span className="text-muted-foreground whitespace-nowrap">{l.timestamp}</span>
+                      <span className="font-bold">[{l.level}]</span>
+                      <span className="break-all whitespace-pre-wrap">{l.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
       </div>
 
       <div className="flex-shrink-0 mt-4">
@@ -108,8 +148,20 @@ export default function SessionDetail() {
           </CardHeader>
           <CardContent>
             <div className="flex gap-2">
-              <Button onClick={connect}>Connect</Button>
-              <Button variant="secondary" onClick={disconnect}>Disconnect</Button>
+              <Button
+                onClick={connect}
+                variant={(wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
+                disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting}
+              >
+                Connect
+              </Button>
+              <Button
+                onClick={disconnect}
+                variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
+                disabled={wsStatus !== WsStatus.Connected}
+              >
+                Disconnect
+              </Button>
               <Button onClick={() => { isMicOn ? (stopMic(), setIsMicOn(false)) : (startMic(), setIsMicOn(true)); }}>
                 {isMicOn ? 'Stop Mic' : 'Start Mic'}
               </Button>

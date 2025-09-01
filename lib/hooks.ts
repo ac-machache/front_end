@@ -113,7 +113,11 @@ export function useWebSocket(url: string, onOpen: () => void, onMessage: (data: 
 }
 
 // Audio processing
-export function useAudioProcessor(onMicData: (base64Data: string, mime?: string) => void, addLog: (level: LogLevel, message: string, data?: any) => void) {
+export function useAudioProcessor(
+  onMicData: (base64Data: string, mime?: string) => void,
+  addLog: (level: LogLevel, message: string, data?: any) => void,
+  onLevel?: (level01: number) => void
+) {
   const playerContext = useRef<AudioContext | null>(null);
   const recorderContext = useRef<AudioContext | null>(null);
   const audioPlayerNode = useRef<AudioWorkletNode | null>(null);
@@ -150,7 +154,20 @@ export function useAudioProcessor(onMicData: (base64Data: string, mime?: string)
         const recorderModule = await import(/* webpackIgnore: true */ (recorderModulePath as string));
         const { startAudioRecorderWorklet } = recorderModule as any;
         const [recNode, recCtx, stream] = await startAudioRecorderWorklet((pcm16Buf: ArrayBuffer) => {
-          micChunkQueue.current.push(new Uint8Array(pcm16Buf));
+          const uint8 = new Uint8Array(pcm16Buf);
+          micChunkQueue.current.push(uint8);
+          // Compute simple RMS level for visualization
+          if (onLevel) {
+            const view = new Int16Array(pcm16Buf);
+            let sumSquares = 0;
+            for (let i = 0; i < view.length; i += 1) {
+              const v = view[i] / 32768; // normalize -1..1
+              sumSquares += v * v;
+            }
+            const rms = view.length ? Math.sqrt(sumSquares / view.length) : 0;
+            const clamped = Math.max(0, Math.min(1, rms));
+            onLevel(clamped);
+          }
         });
         await recCtx.resume().catch(() => {});
         recorderNode.current = recNode; recorderContext.current = recCtx; micStreamRef.current = stream;
@@ -177,8 +194,11 @@ export function useAudioProcessor(onMicData: (base64Data: string, mime?: string)
     if (audioPlayerNode.current) { audioPlayerNode.current.disconnect(); audioPlayerNode.current = null; }
     if (micFlushTimer.current != null) { window.clearInterval(micFlushTimer.current); micFlushTimer.current = null; }
     micChunkQueue.current = [];
-    if (recorderContext.current) { recorderContext.current.close().then(() => { recorderContext.current = null; }); }
-    if (playerContext.current) { playerContext.current.close().then(() => { playerContext.current = null; }); }
+
+    // Do not aggressively close the contexts. Instead, nullify them and let
+    // the browser's garbage collector handle cleanup gracefully. This prevents crashes.
+    recorderContext.current = null;
+    playerContext.current = null;
   }, []);
 
   const playAudioChunk = useCallback((base64Data: string) => {
