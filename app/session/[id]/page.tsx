@@ -4,12 +4,13 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
 import AIVoice from '@/components/kokonutui/ai-voice';
 // removed Loader2-based status row in events panel
 import AITextLoading from '@/components/kokonutui/ai-text-loading';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
-import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
+import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
 import { buildWsUrl } from '@/lib/utils';
 
 export default function SessionDetail() {
@@ -27,39 +28,33 @@ export default function SessionDetail() {
   React.useEffect(() => {
     const id = params?.id as string;
     if (id && config.sessionId !== id) setConfig(prev => ({ ...prev, sessionId: id }));
-  }, [params?.id]);
+  }, [params?.id, config.sessionId, setConfig]);
 
   React.useEffect(() => {
     setIsHydrated(true);
   }, []);
 
-  const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
+  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
     setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
   }, []);
 
   const wsUrl = useMemo(() => buildWsUrl(config), [config]);
-  const apiClient = useApiClient(config, addLog);
 
   const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
 
   // Bridge sendMessage to audio hook without TDZ issues
-  const sendMessageRef = useRef<(data: any) => void>(() => {});
+  const sendMessageRef = useRef<(data: unknown) => void>(() => {});
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
   const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
-  // Transcription display disabled for now
   const [toolLabel, setToolLabel] = useState<string>('');
-  const [partialBuffer, setPartialBuffer] = useState<string>('');
-  const [toolFeed, setToolFeed] = useState<string[]>([]); // rotating feed for AITextLoading
   type Mode = 'idle' | 'listening' | 'speaking' | 'thinking';
   const [mode, setMode] = useState<Mode>('idle');
   const speakTimerRef = useRef<number | null>(null);
-  const prevModeRef = useRef<Mode>('idle');
 
-  const onWsMessage = useCallback((data: any) => {
+  const onWsMessage = useCallback((data: Record<string, unknown>) => {
     if (data?.event) {
-      // Handle function call/response indicators
       const name: string = (data?.name || '') as string;
       const lower = name.toLowerCase();
       const labelFor = (toolLower: string, original: string) => {
@@ -72,13 +67,9 @@ export default function SessionDetail() {
       if (data.event === 'function_call') {
         const label = labelFor(lower, name);
         setToolLabel(label);
-        // Do not accumulate feed anymore; just show the current label via mode
-        prevModeRef.current = isMicOn ? 'listening' : 'idle';
         setMode('thinking');
       } else if (data.event === 'function_response') {
-        // Clear indicator when a tool finishes and revert to baseline
         setToolLabel('');
-        // If the model is (or was just) speaking, prefer speaking; otherwise listening/idle
         if (speakTimerRef.current) {
           setMode('speaking');
           window.clearTimeout(speakTimerRef.current);
@@ -96,10 +87,6 @@ export default function SessionDetail() {
         clearPlaybackQueue();
       }
       setToolLabel('');
-      // Clear partials at end of turn
-      setPartialBuffer('');
-      setToolFeed([]);
-      // Prefer speaking if audio frames arrived very recently, else listening/idle
       if (speakTimerRef.current) {
         setMode('speaking');
         window.clearTimeout(speakTimerRef.current);
@@ -117,29 +104,22 @@ export default function SessionDetail() {
         speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 1200);
         return;
       }
-      if (typeof data.data === 'string' && data.mime_type === 'text/plain') {
-        // skip showing transcription for now
-        setPartialBuffer(data.data);
-        return;
-      }
     }
-    // Do not log unhandled messages
-    // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue, isMicOn, mode]);
+  }, [addLog, playAudioChunk, clearPlaybackQueue, isMicOn]);
+
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
-    // Always release microphone hardware and reset streaming gate on close
     stopMic();
     setStreamingEnabled(false);
     setIsMicOn(false);
     setMode('idle');
-  }, [addLog, stopMic]);
+  }, [addLog, stopMic, setStreamingEnabled]);
+
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
 
-  // Keep ref in sync once hook returns sendMessage
   React.useEffect(() => {
-    sendMessageRef.current = (data: any) => sendMessage(data);
+    sendMessageRef.current = (data: unknown) => sendMessage(data);
   }, [sendMessage]);
 
   // Manual connect only via UI controls to avoid auto-reconnect behavior
@@ -156,9 +136,12 @@ export default function SessionDetail() {
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
       <div className="flex-shrink-0 flex justify-between items-center mb-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Session {isHydrated ? (config.sessionId || (params?.id as string) || '') : ''}</h1>
-          <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+          <div>
+            <h1 className="text-2xl font-semibold">Session {isHydrated ? (config.sessionId || (params?.id as string) || '') : ''}</h1>
+            <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
+          </div>
         </div>
         <Button variant="secondary" onClick={() => router.replace('/?page=list')}>Retour aux sessions</Button>
       </div>
@@ -219,8 +202,8 @@ export default function SessionDetail() {
             <CardContent>
               <AIVoice
                 active={isMicOn}
-                onToggle={(next) => {
-                  if (next) {
+                onToggle={(_next) => {
+                  if (_next) {
                     // Turn on streaming to backend, keep mic device untouched
                     setStreamingEnabled(true);
                     setIsMicOn(true);
@@ -251,7 +234,7 @@ export default function SessionDetail() {
                     try {
                       await startMic();
                       connect();
-                    } catch (e) {
+                    } catch {
                       setIsConnecting(false);
                     }
                   }}

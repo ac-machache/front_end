@@ -1,16 +1,14 @@
 "use client";
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
-import type { Config, LogEntry, Session } from '@/lib/types';
-import { LogLevel } from '@/lib/types';
-import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
-import { buildWsUrl } from '@/lib/utils';
+import type { Config, Session } from '@/lib/types';
+import { useLocalStorage, useApiClient, useAudioProcessor } from '@/lib/hooks';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 type Page = 'config' | 'list' | 'detail';
@@ -21,66 +19,32 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState<Page>('config');
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'ws', host: 'localhost', port: '8080', appName: 'app', userId: 'user', sessionId: '' });
   const [environment, setEnvironment] = useLocalStorage<'local' | 'cloud'>('app-environment', 'local');
-  const [apiResult, setApiResult] = useState<any>(null); // Sessions list or other API responses
+  const [apiResult, setApiResult] = useState<Session[] | null>(null); // Sessions list or other API responses
   const [apiResultTitle, setApiResultTitle] = useState('Espace session');
-  const [selectedSession, setSelectedSession] = useState<any | null>(null);
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [isMicOn, setIsMicOn] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isListing, setIsListing] = useState(false);
-  const logCounter = useRef(0);
+  const [sessionsCurrentPage, setSessionsCurrentPage] = useState(1);
+  const [createFields, setCreateFields] = useState({ nom_tc: '', nom_agri: '' });
+  const sessionsPerPage = 5;
 
-  const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
-    setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
-  }, []);
+  const apiClient = useApiClient(config);
 
-  const wsUrl = useMemo(() => buildWsUrl(config), [config]);
-  const apiClient = useApiClient(config, addLog);
-
-  const handleApiResponse = (title: string, data: any) => {
+  const handleApiResponse = (title: string, data: Session[] | Session | null) => {
     if (!data) return;
     setApiResultTitle(title);
-    setApiResult(data);
-    if (title.startsWith('Create Session') && data.id) setConfig(prev => ({ ...prev, sessionId: data.id }));
+    if (Array.isArray(data)) {
+      setApiResult(data);
+    } else {
+      setApiResult(prev => (prev ? [...prev, data] : [data]));
+    }
+    if (title.startsWith('Create Session') && 'id' in data && data.id) {
+      setConfig(prev => ({ ...prev, sessionId: data.id }));
+    }
   };
 
-  const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
-
-  // Bridge sendMessage into audio hook without TDZ
-  const sendMessageRef = useRef<(data: any) => void>(() => {});
-  const onMicData = useCallback((base64: string) => {
-    sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
-  }, []);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
-
-  const onWsMessage = useCallback((data: any) => {
-    if (data?.event) {
-      addLog(LogLevel.Event, data.event, data.data);
-      return;
-    }
-    if (data?.turn_complete !== undefined || data?.interrupted !== undefined) {
-      addLog(LogLevel.Event, 'Turn Control', data);
-      if (data?.interrupted) clearPlaybackQueue();
-      return;
-    }
-    if (data?.mime_type && data?.data) {
-      if (data.mime_type.startsWith('audio/')) {
-        playAudioChunk(data.data);
-        return;
-      }
-    }
-    // Do not log unhandled messages
-    // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue]);
-
-  const onWsClose = useCallback((code?: number, reason?: string) => {
-    addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
-    if (isMicOn) { stopMic(); setIsMicOn(false); }
-  }, [addLog, isMicOn, stopMic]);
-  const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
-  const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
-  React.useEffect(() => { sendMessageRef.current = (data: any) => sendMessage(data); }, [sendMessage]);
+  useAudioProcessor(() => {}, () => {});
 
   const handleGoToSession = (sessionId: string) => {
     setConfig(prev => ({ ...prev, sessionId }));
@@ -195,9 +159,12 @@ export default function Home() {
   return (
     <div className="max-w-6xl mx-auto p-4">
       <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold">IAdvisor</h1>
-          <p className="text-muted-foreground">{currentPage === 'list' ? 'Gérez vos sessions.' : `Session en cours : ${config.sessionId}`}</p>
+        <div className="flex items-center gap-4">
+          <ThemeToggle />
+          <div>
+            <h1 className="text-2xl font-semibold">IAdvisor</h1>
+            <p className="text-muted-foreground">{currentPage === 'list' ? 'Gérez vos sessions.' : `Session en cours : ${config.sessionId}`}</p>
+          </div>
         </div>
         <Button variant="secondary" onClick={() => setCurrentPage('config')}>Modifier la configuration</Button>
       </div>
@@ -211,13 +178,13 @@ export default function Home() {
               <div className="space-y-3">
                 <div>
                   <Label>Nom TC</Label>
-                  <Input id="nom_tc" placeholder="e.g. Jean Dupont" className="mt-1" onChange={(e) => (window as any)._nom_tc = e.target.value} />
+                  <Input id="nom_tc" placeholder="e.g. Jean Dupont" className="mt-1" onChange={(e) => setCreateFields(prev => ({ ...prev, nom_tc: e.target.value }))} />
                 </div>
                 <div>
                   <Label>Nom Agri</Label>
-                  <Input id="nom_agri" placeholder="e.g. Marie Martin" className="mt-1" onChange={(e) => (window as any)._nom_agri = e.target.value} />
+                  <Input id="nom_agri" placeholder="e.g. Marie Martin" className="mt-1" onChange={(e) => setCreateFields(prev => ({ ...prev, nom_agri: e.target.value }))} />
                 </div>
-                <Button className="w-full" disabled={isCreating} onClick={() => create({ nom_tc: (window as any)._nom_tc, nom_agri: (window as any)._nom_agri })}>
+                <Button className="w-full" disabled={isCreating} onClick={() => create(createFields)}>
                   {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {isCreating ? 'Creating...' : 'Create'}
                 </Button>
@@ -243,16 +210,37 @@ export default function Home() {
             <CardContent>
               <div className="space-y-2">
                 {Array.isArray(apiResult) && apiResult.length > 0 ? (
-                  apiResult.map((s: any) => (
-                    <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                      <span className="font-mono text-sm truncate">{formatTs(s.lastUpdateTime) !== 'N/A' ? formatTs(s.lastUpdateTime) : s.id}</span>
-                      <Button size="sm" variant="secondary" onClick={() => showSessionDetails(s.id)}>Select</Button>
-                    </div>
-                  ))
+                  apiResult
+                    .slice(
+                      (sessionsCurrentPage - 1) * sessionsPerPage,
+                      sessionsCurrentPage * sessionsPerPage
+                    )
+                    .map((s: Session) => (
+                      <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <span className="font-mono text-sm truncate">{formatTs(s.lastUpdateTime) !== 'N/A' ? formatTs(s.lastUpdateTime) : s.id}</span>
+                        <Button size="sm" variant="secondary" onClick={() => showSessionDetails(s.id)}>Select</Button>
+                      </div>
+                    ))
                 ) : (
-                  <p className="text-sm text-muted-foreground">No sessions loaded. Click "List Sessions".</p>
+                  <p className="text-sm text-muted-foreground">No sessions loaded. Click &quot;List Sessions&quot;.</p>
                 )}
               </div>
+              {Array.isArray(apiResult) && apiResult.length > sessionsPerPage && (
+                <div className="flex justify-between mt-4">
+                  <Button
+                    onClick={() => setSessionsCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={sessionsCurrentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    onClick={() => setSessionsCurrentPage(p => Math.min(Math.ceil(apiResult.length / sessionsPerPage), p + 1))}
+                    disabled={sessionsCurrentPage === Math.ceil(apiResult.length / sessionsPerPage)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -316,11 +304,11 @@ export default function Home() {
                             </div>
                           )}
 
-                          {/* Plan d'action */}
+                          {/* Plan d&apos;action */}
                           {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
-                                <h4 className="font-medium">Plan d'action – TC</h4>
+                                <h4 className="font-medium">Plan d&apos;action – TC</h4>
                                 <ul className="list-disc pl-5 text-sm space-y-1">
                                   {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
                                     <li key={`ap-tc-${idx}`}>{i}</li>
@@ -328,7 +316,7 @@ export default function Home() {
                                 </ul>
                               </div>
                               <div>
-                                <h4 className="font-medium">Plan d'action – Agriculteur</h4>
+                                <h4 className="font-medium">Plan d&apos;action – Agriculteur</h4>
                                 <ul className="list-disc pl-5 text-sm space-y-1">
                                   {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
                                     <li key={`ap-farmer-${idx}`}>{i}</li>
@@ -338,7 +326,7 @@ export default function Home() {
                             </div>
                           )}
 
-                          {/* Détecteur d'opportunités */}
+                          {/* Détecteur d&apos;opportunités */}
                           {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                               <div>
@@ -432,7 +420,7 @@ export default function Home() {
                           {selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep && (
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                               <div>
-                                <h4 className="font-medium">Sujet d'ouverture</h4>
+                                <h4 className="font-medium">Sujet d&apos;ouverture</h4>
                                 <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
                               </div>
                               <div>
@@ -446,7 +434,7 @@ export default function Home() {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      <div className="text-sm">La session n'est pas terminée. Aucun rapport généré pour l'instant.</div>
+                      <div className="text-sm">La session n&apos;est pas terminée. Aucun rapport généré pour l&apos;instant.</div>
                       <Button onClick={() => handleGoToSession(selectedSession.id)}>Ouvrir le temps réel</Button>
                     </div>
                   )}
