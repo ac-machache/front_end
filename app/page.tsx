@@ -18,11 +18,14 @@ import {
   DrawerTitle,
   DrawerTrigger,
 } from "@/components/ui/drawer"
+import { DynamicDisplay } from "@/components/dynamic-display"
 
 export default function Home() {
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'ws', host: 'localhost', port: '8080', appName: 'app', userId: 'user', sessionId: '' });
   const [environment, setEnvironment] = useLocalStorage<'local' | 'cloud'>('app-environment', 'local');
   const [apiResult, setApiResult] = useState<Session[] | null>(null); // Sessions list or other API responses
+  const [selectedSession, setSelectedSession] = useState<Session | null>(null);
+  const [isLoadingSession, setIsLoadingSession] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isListing, setIsListing] = useState(false);
   const [sessionsCurrentPage, setSessionsCurrentPage] = useState(1);
@@ -33,6 +36,7 @@ export default function Home() {
 
   const handleApiResponse = (title: string, data: Session[] | Session | null) => {
     if (!data) return;
+    setApiResultTitle(title);
     if (Array.isArray(data)) {
       setApiResult(data);
     } else {
@@ -54,6 +58,19 @@ export default function Home() {
       }
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // Select session: fetch details and display on the right panel (no navigation)
+  const showSessionDetails = async (sessionId: string) => {
+    setSelectedSession(null);
+    setIsLoadingSession(true);
+    try {
+      const details = await apiClient.getSession(sessionId);
+      setSelectedSession(details);
+      setApiResultTitle('Session Details');
+    } finally {
+      setIsLoadingSession(false);
     }
   };
 
@@ -82,129 +99,151 @@ export default function Home() {
 
   return (
     <div className="container max-w-6xl p-4">
-      <div className="space-y-6">
-        <Card>
-          <CardHeader>
-            <CardTitle>Actions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-3">
-              <div>
-                <Label>Nom TC</Label>
-                <Input id="nom_tc" placeholder="e.g. Jean Dupont" className="mt-1" onChange={(e) => setCreateFields(prev => ({ ...prev, nom_tc: e.target.value }))} />
-              </div>
-              <div>
-                <Label>Nom Agri</Label>
-                <Input id="nom_agri" placeholder="e.g. Marie Martin" className="mt-1" onChange={(e) => setCreateFields(prev => ({ ...prev, nom_agri: e.target.value }))} />
-              </div>
-              <Button className="w-full" disabled={isCreating} onClick={() => create(createFields)}>
-                {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isCreating ? 'Creating...' : 'Create'}
-              </Button>
-              <Button className="w-full" disabled={isListing} onClick={async () => {
-                setIsListing(true);
-                try {
-                  const data = await apiClient.listSessions();
-                  handleApiResponse('Session List', data);
-                } finally {
-                  setIsListing(false);
-                }
-              }}>
-                {isListing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {isListing ? 'Listing...' : 'List Sessions'}
-              </Button>
-              <Drawer>
-                <DrawerTrigger asChild>
-                  <Button variant="outline" className="w-full">Configuration</Button>
-                </DrawerTrigger>
-                <DrawerContent>
-                  <DrawerHeader>
-                    <DrawerTitle>Configuration</DrawerTitle>
-                    <DrawerDescription>
-                      Configure your connection settings.
-                    </DrawerDescription>
-                  </DrawerHeader>
-                  <div className="px-4">
-                    <div className="space-y-4">
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <Label htmlFor="environment">Environment</Label>
-                          <select id="environment" name="environment" value={environment} onChange={(e) => setEnvironment(e.target.value as 'local' | 'cloud')} className="mt-1 block w-full bg-background border border-input rounded-md px-3 py-2 text-sm">
-                            <option value="local">Local (Proxied)</option>
-                            <option value="cloud">Cloud Run</option>
-                          </select>
-                        </div>
-                        <div>
-                          <Label htmlFor="userId">User ID</Label>
-                          <Input id="userId" value={config.userId} onChange={(e) => setConfig(prev => ({ ...prev, userId: e.target.value }))} className="mt-1" />
-                        </div>
-                      </div>
-                      {environment === 'cloud' && (
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="lg:col-span-1 space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Actions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                <div>
+                  <Label>Nom TC</Label>
+                  <Input id="nom_tc" placeholder="e.g. Jean Dupont" className="mt-1" onChange={(e) => setCreateFields(prev => ({ ...prev, nom_tc: e.target.value }))} />
+                </div>
+                <div>
+                  <Label>Nom Agri</Label>
+                  <Input id="nom_agri" placeholder="e.g. Marie Martin" className="mt-1" onChange={(e) => setCreateFields(prev => ({ ...prev, nom_agri: e.target.value }))} />
+                </div>
+                <Button className="w-full" disabled={isCreating} onClick={() => create(createFields)}>
+                  {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isCreating ? 'Creating...' : 'Create'}
+                </Button>
+                <Button className="w-full" disabled={isListing} onClick={async () => {
+                  setIsListing(true);
+                  try {
+                    const data = await apiClient.listSessions();
+                    handleApiResponse('Session List', data);
+                  } finally {
+                    setIsListing(false);
+                  }
+                }}>
+                  {isListing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isListing ? 'Listing...' : 'List Sessions'}
+                </Button>
+                <Drawer>
+                  <DrawerTrigger asChild>
+                    <Button variant="outline" className="w-full">Configuration</Button>
+                  </DrawerTrigger>
+                  <DrawerContent>
+                    <DrawerHeader>
+                      <DrawerTitle>Configuration</DrawerTitle>
+                      <DrawerDescription>
+                        Configure your connection settings.
+                      </DrawerDescription>
+                    </DrawerHeader>
+                    <div className="px-4">
+                      <div className="space-y-4">
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <Label htmlFor="cloudHost">Cloud Run Host</Label>
-                            <Input id="cloudHost" placeholder="your-service-xxxx-xx.run.app" value={config.host} onChange={(e) => setConfig(prev => ({ ...prev, host: e.target.value }))} className="mt-1" />
+                            <Label htmlFor="environment">Environment</Label>
+                            <select id="environment" name="environment" value={environment} onChange={(e) => setEnvironment(e.target.value as 'local' | 'cloud')} className="mt-1 block w-full bg-background border border-input rounded-md px-3 py-2 text-sm">
+                              <option value="local">Local (Proxied)</option>
+                              <option value="cloud">Cloud Run</option>
+                            </select>
                           </div>
                           <div>
-                            <Label htmlFor="cloudPort">Port</Label>
-                            <Input id="cloudPort" value={config.port} onChange={(e) => setConfig(prev => ({ ...prev, port: e.target.value }))} className="mt-1" />
+                            <Label htmlFor="userId">User ID</Label>
+                            <Input id="userId" value={config.userId} onChange={(e) => setConfig(prev => ({ ...prev, userId: e.target.value }))} className="mt-1" />
                           </div>
                         </div>
-                      )}
+                        {environment === 'cloud' && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <Label htmlFor="cloudHost">Cloud Run Host</Label>
+                              <Input id="cloudHost" placeholder="your-service-xxxx-xx.run.app" value={config.host} onChange={(e) => setConfig(prev => ({ ...prev, host: e.target.value }))} className="mt-1" />
+                            </div>
+                            <div>
+                              <Label htmlFor="cloudPort">Port</Label>
+                              <Input id="cloudPort" value={config.port} onChange={(e) => setConfig(prev => ({ ...prev, port: e.target.value }))} className="mt-1" />
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <DrawerFooter>
-                    <DrawerClose asChild>
-                      <Button variant="outline">Close</Button>
-                    </DrawerClose>
-                  </DrawerFooter>
-                </DrawerContent>
-              </Drawer>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Sessions</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {Array.isArray(apiResult) && apiResult.length > 0 ? (
-                apiResult
-                  .slice(
-                    (sessionsCurrentPage - 1) * sessionsPerPage,
-                    sessionsCurrentPage * sessionsPerPage
-                  )
-                  .map((s: Session) => (
-                    <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                      <span className="font-mono text-sm truncate">{formatTs(s.lastUpdateTime) !== 'N/A' ? formatTs(s.lastUpdateTime) : s.id}</span>
-                      <Link href={`/session/${s.id}`} passHref>
-                        <Button size="sm" variant="outline">View</Button>
-                      </Link>
-                    </div>
-                  ))
-              ) : (
-                <p className="text-sm text-muted-foreground">No sessions loaded. Click &quot;List Sessions&quot;.</p>
-              )}
-            </div>
-            {Array.isArray(apiResult) && apiResult.length > sessionsPerPage && (
-              <div className="flex justify-between mt-4">
-                <Button
-                  onClick={() => setSessionsCurrentPage(p => Math.max(1, p - 1))}
-                  disabled={sessionsCurrentPage === 1}
-                >
-                  Previous
-                </Button>
-                <Button
-                  onClick={() => setSessionsCurrentPage(p => Math.min(Math.ceil(apiResult.length / sessionsPerPage), p + 1))}
-                  disabled={sessionsCurrentPage === Math.ceil(apiResult.length / sessionsPerPage)}
-                >
-                  Next
-                </Button>
+                    <DrawerFooter>
+                      <DrawerClose asChild>
+                        <Button variant="outline">Close</Button>
+                      </DrawerClose>
+                    </DrawerFooter>
+                  </DrawerContent>
+                </Drawer>
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle>Sessions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2">
+                {Array.isArray(apiResult) && apiResult.length > 0 ? (
+                  apiResult
+                    .slice(
+                      (sessionsCurrentPage - 1) * sessionsPerPage,
+                      sessionsCurrentPage * sessionsPerPage
+                    )
+                    .map((s: Session) => (
+                      <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2">
+                        <span className="font-mono text-sm truncate">{formatTs(s.lastUpdateTime) !== 'N/A' ? formatTs(s.lastUpdateTime) : s.id}</span>
+                        <div className="flex gap-2">
+                          <Button size="sm" variant="secondary" onClick={() => showSessionDetails(s.id)}>Select</Button>
+                          <Link href={`/session/${s.id}`} passHref>
+                            <Button size="sm" variant="outline">View</Button>
+                          </Link>
+                        </div>
+                      </div>
+                    ))
+                ) : (
+                  <p className="text-sm text-muted-foreground">No sessions loaded. Click &quot;List Sessions&quot;.</p>
+                )}
+              </div>
+              {Array.isArray(apiResult) && apiResult.length > sessionsPerPage && (
+                <div className="flex justify-between mt-4">
+                  <Button
+                    onClick={() => setSessionsCurrentPage(p => Math.max(1, p - 1))}
+                    disabled={sessionsCurrentPage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    onClick={() => setSessionsCurrentPage(p => Math.min(Math.ceil(apiResult.length / sessionsPerPage), p + 1))}
+                    disabled={sessionsCurrentPage === Math.ceil(apiResult.length / sessionsPerPage)}
+                  >
+                    Next
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+        <div className="lg:col-span-2">
+          {isLoadingSession && (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+          )}
+          {!isLoadingSession && !selectedSession && (
+            <Card className="flex items-center justify-center h-full">
+              <CardContent>
+                <p className="text-muted-foreground">Sélectionnez une session pour afficher ses détails.</p>
+              </CardContent>
+            </Card>
+          )}
+          {!isLoadingSession && selectedSession && (
+            <DynamicDisplay data={selectedSession as unknown as Record<string, unknown>} />
+          )}
+        </div>
       </div>
     </div>
   );
