@@ -126,6 +126,10 @@ export function useAudioProcessor(
   const micChunkQueue = useRef<Uint8Array[]>([]);
   const micFlushTimer = useRef<number | null>(null);
   const MIC_FLUSH_MS = 200;
+  // Gate to allow pausing the upstream without releasing the mic device
+  // Default OFF so UI mic button explicitly enables sending
+  const streamingEnabledRef = useRef<boolean>(false);
+  const setStreamingEnabled = (enabled: boolean) => { streamingEnabledRef.current = enabled; };
 
   function convertFloat32ToPCM16(float32: Float32Array): ArrayBuffer {
     const pcm16 = new Int16Array(float32.length);
@@ -179,7 +183,9 @@ export function useAudioProcessor(
           let total = 0; for (const c of micChunkQueue.current) total += c.length;
           const combined = new Uint8Array(total); let off = 0; for (const c of micChunkQueue.current) { combined.set(c, off); off += c.length; }
           micChunkQueue.current = [];
-          onMicData(arrayBufferToBase64(combined.buffer), 'audio/pcm');
+          if (streamingEnabledRef.current) {
+            onMicData(arrayBufferToBase64(combined.buffer), 'audio/pcm');
+          }
         }, MIC_FLUSH_MS);
       }
     } catch (err: any) {
@@ -211,6 +217,6 @@ export function useAudioProcessor(
 
   useEffect(() => () => { stopMic(); }, [stopMic]);
 
-  return { startMic, stopMic, playAudioChunk, clearPlaybackQueue };
+  return { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled };
 }
 

@@ -28,6 +28,7 @@ export default function Home() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
+  const [isListing, setIsListing] = useState(false);
   const logCounter = useRef(0);
 
   const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
@@ -220,7 +221,18 @@ export default function Home() {
                   {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {isCreating ? 'Creating...' : 'Create'}
                 </Button>
-                <Button className="w-full" onClick={async () => handleApiResponse('Session List', await apiClient.listSessions())}>List Sessions</Button>
+                <Button className="w-full" disabled={isListing} onClick={async () => {
+                  setIsListing(true);
+                  try {
+                    const data = await apiClient.listSessions();
+                    handleApiResponse('Session List', data);
+                  } finally {
+                    setIsListing(false);
+                  }
+                }}>
+                  {isListing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isListing ? 'Listing...' : 'List Sessions'}
+                </Button>
               </div>
             </CardContent>
           </Card>

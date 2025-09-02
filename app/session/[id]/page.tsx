@@ -3,6 +3,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Loader2 } from 'lucide-react';
 import AIVoice from '@/components/kokonutui/ai-voice';
 // removed Loader2-based status row in events panel
 import AITextLoading from '@/components/kokonutui/ai-text-loading';
@@ -18,6 +19,8 @@ export default function SessionDetail() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isDisconnecting, setIsDisconnecting] = useState(false);
   const logCounter = useRef(0);
 
   // Ensure sessionId matches URL
@@ -44,7 +47,7 @@ export default function SessionDetail() {
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
   // Transcription display disabled for now
   const [toolLabel, setToolLabel] = useState<string>('');
   const [partialBuffer, setPartialBuffer] = useState<string>('');
@@ -125,9 +128,12 @@ export default function SessionDetail() {
   }, [addLog, playAudioChunk, clearPlaybackQueue, isMicOn, mode]);
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
-    if (isMicOn) { stopMic(); setIsMicOn(false); }
+    // Always release microphone hardware and reset streaming gate on close
+    stopMic();
+    setStreamingEnabled(false);
+    setIsMicOn(false);
     setMode('idle');
-  }, [addLog, isMicOn, stopMic]);
+  }, [addLog, stopMic]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
 
@@ -140,6 +146,12 @@ export default function SessionDetail() {
   React.useEffect(() => {
     setMode(isMicOn ? 'listening' : 'idle');
   }, [isMicOn]);
+
+  // Reset local loading flags on status changes
+  React.useEffect(() => {
+    if (wsStatus !== WsStatus.Connecting) setIsConnecting(false);
+    if (wsStatus === WsStatus.Disconnected) setIsDisconnecting(false);
+  }, [wsStatus]);
 
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
@@ -209,12 +221,13 @@ export default function SessionDetail() {
                 active={isMicOn}
                 onToggle={(next) => {
                   if (next) {
-                    startMic();
+                    // Turn on streaming to backend, keep mic device untouched
+                    setStreamingEnabled(true);
                     setIsMicOn(true);
-                    // Default to listening when mic turns on
                     setMode('listening');
                   } else {
-                    stopMic();
+                    // Pause upstream without stopping microphone hardware
+                    setStreamingEnabled(false);
                     setIsMicOn(false);
                     setMode('idle');
                   }
@@ -232,20 +245,39 @@ export default function SessionDetail() {
             <CardContent>
               <div className="flex flex-col gap-2">
                 <Button
-                  onClick={connect}
+                  onClick={async () => {
+                    // Start mic hardware on Connect; streaming remains gated by mic button
+                    setIsConnecting(true);
+                    try {
+                      await startMic();
+                      connect();
+                    } catch (e) {
+                      setIsConnecting(false);
+                    }
+                  }}
                   className="w-full"
                   variant={(wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
-                  disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting}
+                  disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting || isConnecting}
                 >
-                  Connecter
+                  {(isConnecting || wsStatus === WsStatus.Connecting) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {(isConnecting || wsStatus === WsStatus.Connecting) ? 'Connexion…' : 'Connecter'}
                 </Button>
                 <Button
-                  onClick={disconnect}
+                  onClick={() => {
+                    // Release mic hardware cleanly on Disconnect
+                    setIsDisconnecting(true);
+                    disconnect();
+                    stopMic();
+                    setStreamingEnabled(false);
+                    setIsMicOn(false);
+                    setMode('idle');
+                  }}
                   className="w-full"
                   variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
-                  disabled={wsStatus !== WsStatus.Connected}
+                  disabled={wsStatus !== WsStatus.Connected || isDisconnecting}
                 >
-                  Déconnecter
+                  {isDisconnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isDisconnecting ? 'Déconnexion…' : 'Déconnecter'}
                 </Button>
               </div>
             </CardContent>
