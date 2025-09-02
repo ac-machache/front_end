@@ -10,7 +10,7 @@ export interface Config {
 export interface Session {
   id: string;
   lastUpdateTime?: string;
-  [key: string]: any;
+  [key: string]: unknown;
 }
 
 export enum LogLevel {
@@ -28,7 +28,7 @@ export interface LogEntry {
   level: LogLevel;
   message: string;
   timestamp: string;
-  data?: any;
+  data?: unknown;
 }
 
 export enum WsStatus {

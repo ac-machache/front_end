@@ -58,10 +58,11 @@ const DynamicText = ({ items, intervalMs = 600, className, textClassName }: Dyna
     }, [isAnimating, list.length, intervalMs]);
 
     // Restart animation when the items list changes
+    const listString = JSON.stringify(list);
     useEffect(() => {
         setCurrentIndex(0);
         setIsAnimating(true);
-    }, [JSON.stringify(list)]);
+    }, [listString]);
 
     // Animation variants for the text
     const textVariants = {

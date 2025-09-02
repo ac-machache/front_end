@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Config, LogEntry, LogLevel, WsStatus } from './types';
+import type { Config, LogLevel, Session, WsStatus } from './types';
 import { LogLevel as LogLevelEnum, WsStatus as WsStatusEnum } from './types';
 import { buildHttpUrl, arrayBufferToBase64, base64ToUint8Array } from './utils';
 // Use the same JS modules as the original app, served from /public/js
@@ -28,34 +28,35 @@ export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dis
 }
 
 // API client
-export function useApiClient(config: Config, addLog: (level: LogLevel, message: string, data?: any) => void) {
+export function useApiClient(config: Config, addLog?: (level: LogLevel, message: string, data?: unknown) => void) {
   const baseUrl = buildHttpUrl(config);
-  const performRequest = useCallback(async <T,>(method: 'GET' | 'POST', path: string, body?: any): Promise<T | null> => {
+  const performRequest = useCallback(async <T,>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<T | null> => {
     const url = `${baseUrl}${path}`;
-    addLog(LogLevelEnum.Http, `${method} ${url}`, body);
+    addLog?.(LogLevelEnum.Http, `${method} ${url}`, body);
     try {
       const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
       const text = await response.text();
       const data = text ? JSON.parse(text) : null;
-      if (!response.ok) { const err: any = new Error(`HTTP ${response.status}`); err.cause = data; throw err; }
-      addLog(LogLevelEnum.Http, `Success: ${response.status}`, data);
+      if (!response.ok) { const err: Error & { cause?: unknown } = new Error(`HTTP ${response.status}`); err.cause = data; throw err; }
+      addLog?.(LogLevelEnum.Http, `Success: ${response.status}`, data);
       return data;
-    } catch (error: any) {
-      addLog(LogLevelEnum.Error, error.message, error.cause || error);
+    } catch (error: unknown) {
+      const err = error as Error & { cause?: unknown };
+      addLog?.(LogLevelEnum.Error, err.message, err.cause || err);
       return null;
     }
   }, [baseUrl, addLog]);
 
   return {
-    createSession: (initialState?: any) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions`, initialState),
-    createSessionWithId: (sessionId: string, initialState?: any) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`, initialState),
-    listSessions: () => performRequest('GET', `/apps/${config.appName}/users/${config.userId}/sessions`),
-    getSession: (sessionId: string) => performRequest('GET', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`),
+    createSession: (initialState?: unknown) => performRequest<Session>('POST', `/apps/${config.appName}/users/${config.userId}/sessions`, initialState),
+    createSessionWithId: (sessionId: string, initialState?: unknown) => performRequest<Session>('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`, initialState),
+    listSessions: () => performRequest<Session[]>('GET', `/apps/${config.appName}/users/${config.userId}/sessions`),
+    getSession: (sessionId: string) => performRequest<Session>('GET', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`),
   };
 }
 
 // WebSocket
-export function useWebSocket(url: string, onOpen: () => void, onMessage: (data: any) => void, onClose: (code: number, reason: string) => void, onError: (event: Event) => void) {
+export function useWebSocket(url: string, onOpen: () => void, onMessage: (data: unknown) => void, onClose: (code: number, reason: string) => void, onError: (event: Event) => void) {
   const ws = useRef<WebSocket | null>(null);
   const isManuallyClosingRef = useRef(false);
   const [status, setStatus] = useState<WsStatus>(WsStatusEnum.Disconnected);
@@ -101,21 +102,21 @@ export function useWebSocket(url: string, onOpen: () => void, onMessage: (data: 
       isManuallyClosingRef.current = true;
       // Detach handlers to avoid duplicate logs during close
       try {
-        ws.current.onopen = null as any;
-        ws.current.onmessage = null as any;
-        ws.current.onerror = null as any;
+        ws.current.onopen = () => {};
+        ws.current.onmessage = () => {};
+        ws.current.onerror = () => {};
       } catch {}
       ws.current.close(1000, 'User disconnected');
     }
   }, []);
-  const sendMessage = useCallback((data: any) => { if (ws.current && ws.current.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(data)); }, []);
+  const sendMessage = useCallback((data: unknown) => { if (ws.current && ws.current.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(data)); }, []);
   return { connect, disconnect, sendMessage, status };
 }
 
 // Audio processing
 export function useAudioProcessor(
   onMicData: (base64Data: string, mime?: string) => void,
-  addLog: (level: LogLevel, message: string, data?: any) => void,
+  addLog: (level: LogLevel, message: string, data?: unknown) => void,
   onLevel?: (level01: number) => void
 ) {
   const playerContext = useRef<AudioContext | null>(null);
@@ -131,22 +132,13 @@ export function useAudioProcessor(
   const streamingEnabledRef = useRef<boolean>(false);
   const setStreamingEnabled = (enabled: boolean) => { streamingEnabledRef.current = enabled; };
 
-  function convertFloat32ToPCM16(float32: Float32Array): ArrayBuffer {
-    const pcm16 = new Int16Array(float32.length);
-    for (let i = 0; i < float32.length; i++) {
-      const s = Math.max(-1, Math.min(1, float32[i]));
-      pcm16[i] = s * 0x7fff;
-    }
-    return pcm16.buffer;
-  }
-
   const startMic = useCallback(async () => {
     try {
       // Ensure player is initialized
       if (!playerContext.current) {
         const playerModulePath = '/js/audio-player.js';
         const playerModule = await import(/* webpackIgnore: true */ (playerModulePath as string));
-        const { startAudioPlayerWorklet } = playerModule as any;
+        const { startAudioPlayerWorklet } = playerModule as { startAudioPlayerWorklet: () => Promise<[AudioWorkletNode, AudioContext]> };
         const [player, audioContext] = await startAudioPlayerWorklet();
         await audioContext.resume().catch(() => {});
         audioPlayerNode.current = player; playerContext.current = audioContext;
@@ -156,7 +148,7 @@ export function useAudioProcessor(
       if (!recorderContext.current) {
         const recorderModulePath = '/js/audio-recorder.js';
         const recorderModule = await import(/* webpackIgnore: true */ (recorderModulePath as string));
-        const { startAudioRecorderWorklet } = recorderModule as any;
+        const { startAudioRecorderWorklet } = recorderModule as { startAudioRecorderWorklet: (onPcm: (pcm: ArrayBuffer) => void) => Promise<[AudioWorkletNode, AudioContext, MediaStream]> };
         const [recNode, recCtx, stream] = await startAudioRecorderWorklet((pcm16Buf: ArrayBuffer) => {
           const uint8 = new Uint8Array(pcm16Buf);
           micChunkQueue.current.push(uint8);
@@ -188,11 +180,11 @@ export function useAudioProcessor(
           }
         }, MIC_FLUSH_MS);
       }
-    } catch (err: any) {
-      const message = err?.message || String(err);
+    } catch (err: unknown) {
+      const message = (err as Error)?.message || String(err);
       addLog(LogLevelEnum.Error, `Error starting microphone: ${message}`, err);
     }
-  }, [addLog, onMicData]);
+  }, [addLog, onMicData, onLevel]);
 
   const stopMic = useCallback(() => {
     if (recorderNode.current) { recorderNode.current.disconnect(); recorderNode.current = null; }
