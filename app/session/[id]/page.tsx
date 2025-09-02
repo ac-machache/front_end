@@ -58,16 +58,8 @@ export default function SessionDetail() {
       if (data.event === 'function_call') {
         const label = labelFor(lower, name);
         setToolLabel(label);
-        setMode('thinking');
       } else if (data.event === 'function_response') {
         setToolLabel('');
-        if (speakTimerRef.current) {
-          setMode('speaking');
-          window.clearTimeout(speakTimerRef.current);
-          speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 800);
-        } else {
-          setMode(isMicOn ? 'listening' : 'idle');
-        }
       }
       console.log('Event:', data.event, data.name || data.data);
       return;
@@ -78,13 +70,7 @@ export default function SessionDetail() {
         clearPlaybackQueue();
       }
       setToolLabel('');
-      if (speakTimerRef.current) {
-        setMode('speaking');
-        window.clearTimeout(speakTimerRef.current);
-        speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 800);
-      } else {
-        setMode(isMicOn ? 'listening' : 'idle');
-      }
+      setMode(isMicOn ? 'listening' : 'idle');
       return;
     }
     if (data?.mime_type && data?.data) {
@@ -136,8 +122,8 @@ export default function SessionDetail() {
               <div className="flex-1 overflow-auto bg-background border rounded-md p-4 min-h-[200px]">
                 <AITextLoading
                   texts={
-                    mode === 'thinking'
-                      ? [toolLabel || 'Réflexion en cours…']
+                    toolLabel
+                      ? [toolLabel]
                       : mode === 'speaking'
                         ? ['Synthèse de parole…']
                         : mode === 'listening'
