@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
 import { Separator } from '@/components/ui/separator';
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import type { Config, LogEntry, Session } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
 import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
@@ -30,6 +31,10 @@ export default function Home() {
   const [isCreating, setIsCreating] = useState(false);
   const [isListing, setIsListing] = useState(false);
   const logCounter = useRef(0);
+  // Controlled Accordion expanded sections
+  const [expandedReportSection, setExpandedReportSection] = useState<React.Key | null>('main_report');
+  const [expandedStrategicSection, setExpandedStrategicSection] = useState<React.Key | null>('proactive_insights');
+  const [reportReadyById, setReportReadyById] = useState<Record<string, boolean>>({});
 
   const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
     setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
@@ -96,11 +101,39 @@ export default function Home() {
       const result = await apiClient.createSession({ nom_tc: fields.nom_tc || '', nom_agri: fields.nom_agri || '' }) as Session | null;
       handleApiResponse('Create Session (Auto-ID)', result);
       if (result?.id) {
-        const updated = await apiClient.listSessions();
-        handleApiResponse('Session List', updated);
+        // Navigate directly to realtime session page
+        setConfig(prev => ({ ...prev, sessionId: result.id }));
+        router.push(`/session/${result.id}`);
       }
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // Prompt user for required fields and start visit
+  const startVisit = async () => {
+    const nom_tc = window.prompt('Nom TC');
+    if (nom_tc == null || nom_tc.trim() === '') return;
+    const nom_agri = window.prompt('Nom Agri');
+    if (nom_agri == null || nom_agri.trim() === '') return;
+    await create({ nom_tc: nom_tc.trim(), nom_agri: nom_agri.trim() });
+  };
+
+  // Refresh sessions and determine which have a report ready
+  const refreshSessions = async () => {
+    setIsListing(true);
+    try {
+      const data = await apiClient.listSessions();
+      handleApiResponse('Session List', data);
+      if (Array.isArray(data)) {
+        const statusMap: Record<string, boolean> = {};
+        for (const s of data as any[]) {
+          statusMap[s.id] = !!(s?.state?.RapportDeSortie);
+        }
+        setReportReadyById(statusMap);
+      }
+    } finally {
+      setIsListing(false);
     }
   };
 
@@ -111,7 +144,7 @@ export default function Home() {
     try {
       const details = await apiClient.getSession(sessionId);
       setSelectedSession(details);
-      setApiResultTitle('Session Details');
+      setApiResultTitle('Rapport de Visite');
     } finally {
       setIsLoadingSession(false);
     }
@@ -123,6 +156,37 @@ export default function Home() {
     if (!isFinite(n)) return ts;
     const d = new Date(n * 1000);
     return d.toLocaleString();
+  };
+
+  const formatRelativeTime = (ts?: string | number) => {
+    if (ts == null) return '—';
+    const n = typeof ts === 'string' ? parseFloat(ts) : Number(ts);
+    if (!isFinite(n)) return '—';
+    const diffMs = Date.now() - n * 1000;
+    const seconds = Math.max(0, Math.floor(diffMs / 1000));
+    if (seconds < 60) return `il y a ${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `il y a ${minutes} min`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `il y a ${hours} h`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `il y a ${days} j`;
+    const d = new Date(n * 1000);
+    return d.toLocaleDateString();
+  };
+
+  const getSessionTitle = (s: any) => {
+    const mr = s?.state?.RapportDeSortie?.main_report;
+    if (mr?.title) return mr.title;
+    const tc = s?.state?.nom_tc || 'TC ?';
+    const ag = s?.state?.nom_agri || 'Agri ?';
+    return `Visite: ${tc} → ${ag}`;
+  };
+
+  const getSessionSubtitle = (s: any) => {
+    const mr = s?.state?.RapportDeSortie?.main_report;
+    if (mr?.date_of_visit) return `Visite du ${mr.date_of_visit}`;
+    return `Mis à jour ${formatRelativeTime(s?.lastUpdateTime)}`;
   };
 
   // Keep config in sync with environment selection
@@ -205,53 +269,48 @@ export default function Home() {
         <div className="col-span-12 md:col-span-4 space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Actions</CardTitle>
+              <CardTitle>Démarrer une visite</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-3">
-                <div>
-                  <Label>Nom TC</Label>
-                  <Input id="nom_tc" placeholder="e.g. Jean Dupont" className="mt-1" onChange={(e) => (window as any)._nom_tc = e.target.value} />
-                </div>
-                <div>
-                  <Label>Nom Agri</Label>
-                  <Input id="nom_agri" placeholder="e.g. Marie Martin" className="mt-1" onChange={(e) => (window as any)._nom_agri = e.target.value} />
-                </div>
-                <Button className="w-full" disabled={isCreating} onClick={() => create({ nom_tc: (window as any)._nom_tc, nom_agri: (window as any)._nom_agri })}>
+                <Button className="w-full" disabled={isCreating} onClick={startVisit}>
                   {isCreating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {isCreating ? 'Creating...' : 'Create'}
-                </Button>
-                <Button className="w-full" disabled={isListing} onClick={async () => {
-                  setIsListing(true);
-                  try {
-                    const data = await apiClient.listSessions();
-                    handleApiResponse('Session List', data);
-                  } finally {
-                    setIsListing(false);
-                  }
-                }}>
-                  {isListing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                  {isListing ? 'Listing...' : 'List Sessions'}
+                  {isCreating ? 'Démarrage…' : 'Commencer une Visite'}
                 </Button>
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader>
-              <CardTitle>Sessions</CardTitle>
+              <CardTitle>Vos visites</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="space-y-2">
+              <div className="space-y-3">
+                <Button className="w-full" disabled={isListing} onClick={refreshSessions}>
+                  {isListing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {isListing ? 'Chargement…' : 'Actualiser la liste'}
+                </Button>
+                <div className="space-y-2">
                 {Array.isArray(apiResult) && apiResult.length > 0 ? (
                   apiResult.map((s: any) => (
-                    <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2">
-                      <span className="font-mono text-sm truncate">{formatTs(s.lastUpdateTime) !== 'N/A' ? formatTs(s.lastUpdateTime) : s.id}</span>
-                      <Button size="sm" variant="secondary" onClick={() => showSessionDetails(s.id)}>Select</Button>
+                    <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2 gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium truncate">{getSessionTitle(s)}</div>
+                        <div className="text-xs text-muted-foreground truncate">{getSessionSubtitle(s)}</div>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={reportReadyById[s.id] ? 'default' : 'secondary'}
+                        onClick={() => (reportReadyById[s.id] ? showSessionDetails(s.id) : handleGoToSession(s.id))}
+                      >
+                        {reportReadyById[s.id] ? 'Voir le rapport' : 'Ouvrir en direct'}
+                      </Button>
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-muted-foreground">No sessions loaded. Click "List Sessions".</p>
+                  <p className="text-sm text-muted-foreground">Aucune visite. Cliquez sur "Actualiser la liste".</p>
                 )}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -271,179 +330,219 @@ export default function Home() {
               {!isLoadingSession && selectedSession && (
                 <div className="space-y-4">
                   {selectedSession?.state?.RapportDeSortie ? (
-                    <div className="space-y-6">
-                      {/* Rapport principal */}
-                      <div>
-                        <h3 className="text-lg font-semibold">Rapport principal</h3>
-                        <Separator className="my-2" />
-                        <div className="space-y-1 text-sm">
-                          <div><span className="font-medium">Titre :</span> {selectedSession.state.RapportDeSortie.main_report?.title}</div>
-                          <div><span className="font-medium">Date :</span> {selectedSession.state.RapportDeSortie.main_report?.date_of_visit}</div>
-                          <div><span className="font-medium">Agriculteur :</span> {selectedSession.state.RapportDeSortie.main_report?.farmer}</div>
-                          <div><span className="font-medium">TC :</span> {selectedSession.state.RapportDeSortie.main_report?.tc}</div>
-                          <div className="whitespace-pre-wrap"><span className="font-medium">Résumé :</span> {selectedSession.state.RapportDeSortie.main_report?.report_summary}</div>
-                        </div>
-                      </div>
+                    <Accordion
+                      className="space-y-3"
+                      transition={{ duration: 0.25, ease: 'easeInOut' }}
+                      variants={{
+                        expanded: { opacity: 1, height: 'auto', y: 0 },
+                        collapsed: { opacity: 0, height: 0, y: -8 },
+                      }}
+                      expandedValue={expandedReportSection}
+                      onValueChange={setExpandedReportSection}
+                    >
+                      <AccordionItem value="main_report" className="rounded-md border">
+                        <AccordionTrigger className="w-full text-left text-lg font-semibold px-4 py-3">Rapport principal</AccordionTrigger>
+                        <AccordionContent className="px-4 pb-4">
+                          <div className="space-y-2 text-sm">
+                            <div><span className="font-medium">Titre :</span> {selectedSession.state.RapportDeSortie.main_report?.title}</div>
+                            <div><span className="font-medium">Date :</span> {selectedSession.state.RapportDeSortie.main_report?.date_of_visit}</div>
+                            <div><span className="font-medium">Agriculteur :</span> {selectedSession.state.RapportDeSortie.main_report?.farmer}</div>
+                            <div><span className="font-medium">TC :</span> {selectedSession.state.RapportDeSortie.main_report?.tc}</div>
+                            <div className="whitespace-pre-wrap"><span className="font-medium">Résumé :</span> {selectedSession.state.RapportDeSortie.main_report?.report_summary}</div>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
 
-                      {/* Tableau de bord stratégique */}
                       {selectedSession.state.RapportDeSortie.strategic_dashboard && (
-                        <div className="space-y-5">
-                          <h3 className="text-lg font-semibold">Tableau de bord stratégique</h3>
-                          <Separator className="my-2" />
+                        <AccordionItem value="strategic_dashboard" className="rounded-md border">
+                          <AccordionTrigger className="w-full text-left text-lg font-semibold px-4 py-3">Tableau de bord stratégique</AccordionTrigger>
+                          <AccordionContent className="px-4 pb-4">
+                            <Accordion
+                              className="space-y-3"
+                              transition={{ duration: 0.2, ease: 'easeInOut' }}
+                              variants={{
+                                expanded: { opacity: 1, height: 'auto', y: 0 },
+                                collapsed: { opacity: 0, height: 0, y: -6 },
+                              }}
+                              expandedValue={expandedStrategicSection}
+                              onValueChange={setExpandedStrategicSection}
+                            >
+                              {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights && (
+                                <AccordionItem value="proactive_insights" className="rounded border">
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Synthèse proactive</AccordionTrigger>
+                                  <AccordionContent className="px-3 pb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div>
+                                        <div className="text-sm font-medium mb-1">Points identifiés</div>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
+                                            <li key={`pi-ii-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <div className="text-sm font-medium mb-1">Pistes/solutions</div>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
+                                            <li key={`pi-ps-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              )}
 
-                          {/* Synthèse proactive */}
-                          {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights && (
-                            <div className="space-y-2">
-                              <h4 className="font-medium">Synthèse proactive</h4>
-                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                <div>
-                                  <div className="text-sm font-medium mb-1">Points identifiés</div>
-                                  <ul className="list-disc pl-5 text-sm space-y-1">
-                                    {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
-                                      <li key={`pi-ii-${idx}`}>{i}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                                <div>
-                                  <div className="text-sm font-medium mb-1">Pistes/solutions</div>
-                                  <ul className="list-disc pl-5 text-sm space-y-1">
-                                    {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
-                                      <li key={`pi-ps-${idx}`}>{i}</li>
-                                    ))}
-                                  </ul>
-                                </div>
-                              </div>
-                            </div>
-                          )}
+                              {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan && (
+                                <AccordionItem value="action_plan" className="rounded border">
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Plan d'action</AccordionTrigger>
+                                  <AccordionContent className="px-3 pb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div>
+                                        <h4 className="font-medium">Plan d'action – TC</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
+                                            <li key={`ap-tc-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Plan d'action – Agriculteur</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
+                                            <li key={`ap-farmer-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              )}
 
-                          {/* Plan d'action */}
-                          {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div>
-                                <h4 className="font-medium">Plan d'action – TC</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
-                                    <li key={`ap-tc-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Plan d'action – Agriculteur</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
-                                    <li key={`ap-farmer-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          )}
+                              {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
+                                <AccordionItem value="opportunity_detector" className="rounded border">
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Détecteur d'opportunités</AccordionTrigger>
+                                  <AccordionContent className="px-3 pb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <div>
+                                        <h4 className="font-medium">Opportunités (ventes)</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.map((i: string, idx: number) => (
+                                            <li key={`od-sales-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Conseils</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.map((i: string, idx: number) => (
+                                            <li key={`od-adv-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Projets agriculteur</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
+                                            <li key={`od-fp-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              )}
 
-                          {/* Détecteur d'opportunités */}
-                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div>
-                                <h4 className="font-medium">Opportunités (ventes)</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.map((i: string, idx: number) => (
-                                    <li key={`od-sales-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Conseils</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.map((i: string, idx: number) => (
-                                    <li key={`od-adv-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Projets agriculteur</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
-                                    <li key={`od-fp-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          )}
+                              {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis && (
+                                <AccordionItem value="risk_analysis" className="rounded border">
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Analyse des risques</AccordionTrigger>
+                                  <AccordionContent className="px-3 pb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <div>
+                                        <h4 className="font-medium">Risque commercial</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.map((i: string, idx: number) => (
+                                            <li key={`risk-com-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Risque technique</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.map((i: string, idx: number) => (
+                                            <li key={`risk-tech-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Signaux faibles</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.map((i: string, idx: number) => (
+                                            <li key={`risk-ws-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              )}
 
-                          {/* Analyse des risques */}
-                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div>
-                                <h4 className="font-medium">Risque commercial</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.map((i: string, idx: number) => (
-                                    <li key={`risk-com-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Risque technique</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.map((i: string, idx: number) => (
-                                    <li key={`risk-tech-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Signaux faibles</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.map((i: string, idx: number) => (
-                                    <li key={`risk-ws-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          )}
+                              {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer && (
+                                <AccordionItem value="relationship_barometer" className="rounded border">
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Baromètre de la relation</AccordionTrigger>
+                                  <AccordionContent className="px-3 pb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                                      <div>
+                                        <h4 className="font-medium">Points de satisfaction</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
+                                            <li key={`rel-sat-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Points de frustration</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
+                                            <li key={`rel-frus-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Notes personnelles</h4>
+                                        <ul className="list-disc pl-5 text-sm space-y-1">
+                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
+                                            <li key={`rel-notes-${idx}`}>{i}</li>
+                                          ))}
+                                        </ul>
+                                      </div>
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              )}
 
-                          {/* Baromètre de la relation */}
-                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer && (
-                            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                              <div>
-                                <h4 className="font-medium">Points de satisfaction</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
-                                    <li key={`rel-sat-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Points de frustration</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
-                                    <li key={`rel-frus-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Notes personnelles</h4>
-                                <ul className="list-disc pl-5 text-sm space-y-1">
-                                  {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
-                                    <li key={`rel-notes-${idx}`}>{i}</li>
-                                  ))}
-                                </ul>
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Préparation du prochain contact */}
-                          {selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep && (
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                              <div>
-                                <h4 className="font-medium">Sujet d'ouverture</h4>
-                                <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
-                              </div>
-                              <div>
-                                <h4 className="font-medium">Objectif de la prochaine visite</h4>
-                                <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective}</p>
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                              {selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep && (
+                                <AccordionItem value="next_contact_prep" className="rounded border">
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Préparation du prochain contact</AccordionTrigger>
+                                  <AccordionContent className="px-3 pb-3">
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                      <div>
+                                        <h4 className="font-medium">Sujet d'ouverture</h4>
+                                        <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
+                                      </div>
+                                      <div>
+                                        <h4 className="font-medium">Objectif de la prochaine visite</h4>
+                                        <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective}</p>
+                                      </div>
+                                    </div>
+                                  </AccordionContent>
+                                </AccordionItem>
+                              )}
+                            </Accordion>
+                          </AccordionContent>
+                        </AccordionItem>
                       )}
-                    </div>
+                    </Accordion>
                   ) : (
                     <div className="space-y-3">
                       <div className="text-sm">La session n'est pas terminée. Aucun rapport généré pour l'instant.</div>
