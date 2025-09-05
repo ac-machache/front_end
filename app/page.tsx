@@ -5,13 +5,10 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Table, TableHeader, TableRow, TableHead, TableBody, TableCell } from '@/components/ui/table';
-import { Separator } from '@/components/ui/separator';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
-import type { Config, LogEntry, Session } from '@/lib/types';
+import type { Config, Session } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
-import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
-import { buildWsUrl } from '@/lib/utils';
+import { useLocalStorage, useApiClient } from '@/lib/hooks';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 type Page = 'config' | 'list' | 'detail';
@@ -26,21 +23,20 @@ export default function Home() {
   const [apiResultTitle, setApiResultTitle] = useState('Espace session');
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
-  const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [isMicOn, setIsMicOn] = useState(false);
+  // Logs removed from UI; keep a minimal logger
   const [isCreating, setIsCreating] = useState(false);
   const [isListing, setIsListing] = useState(false);
-  const logCounter = useRef(0);
   // Controlled Accordion expanded sections
   const [expandedReportSection, setExpandedReportSection] = useState<React.Key | null>('main_report');
   const [expandedStrategicSection, setExpandedStrategicSection] = useState<React.Key | null>('proactive_insights');
   const [reportReadyById, setReportReadyById] = useState<Record<string, boolean>>({});
 
   const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
-    setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
+    if (process.env.NODE_ENV !== 'production') {
+      try { console.debug(`[${level}] ${message}`, data ?? ''); } catch {}
+    }
   }, []);
 
-  const wsUrl = useMemo(() => buildWsUrl(config), [config]);
   const apiClient = useApiClient(config, addLog);
 
   const handleApiResponse = (title: string, data: any) => {
@@ -49,43 +45,6 @@ export default function Home() {
     setApiResult(data);
     if (title.startsWith('Create Session') && data.id) setConfig(prev => ({ ...prev, sessionId: data.id }));
   };
-
-  const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
-
-  // Bridge sendMessage into audio hook without TDZ
-  const sendMessageRef = useRef<(data: any) => void>(() => {});
-  const onMicData = useCallback((base64: string) => {
-    sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
-  }, []);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue } = useAudioProcessor(onMicData, addLog);
-
-  const onWsMessage = useCallback((data: any) => {
-    if (data?.event) {
-      addLog(LogLevel.Event, data.event, data.data);
-      return;
-    }
-    if (data?.turn_complete !== undefined || data?.interrupted !== undefined) {
-      addLog(LogLevel.Event, 'Turn Control', data);
-      if (data?.interrupted) clearPlaybackQueue();
-      return;
-    }
-    if (data?.mime_type && data?.data) {
-      if (data.mime_type.startsWith('audio/')) {
-        playAudioChunk(data.data);
-        return;
-      }
-    }
-    // Do not log unhandled messages
-    // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue]);
-
-  const onWsClose = useCallback((code?: number, reason?: string) => {
-    addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
-    if (isMicOn) { stopMic(); setIsMicOn(false); }
-  }, [addLog, isMicOn, stopMic]);
-  const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
-  const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
-  React.useEffect(() => { sendMessageRef.current = (data: any) => sendMessage(data); }, [sendMessage]);
 
   const handleGoToSession = (sessionId: string) => {
     setConfig(prev => ({ ...prev, sessionId }));

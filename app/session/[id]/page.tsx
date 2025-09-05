@@ -16,7 +16,7 @@ export default function SessionDetail() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [, setLogs] = useState<LogEntry[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
   const [isHydrated, setIsHydrated] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -47,15 +47,15 @@ export default function SessionDetail() {
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
+  const [micLevel, setMicLevel] = useState<number>(0);
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog, (lvl) => setMicLevel(lvl));
   // Transcription display disabled for now
   const [toolLabel, setToolLabel] = useState<string>('');
   const [partialBuffer, setPartialBuffer] = useState<string>('');
   const [toolFeed, setToolFeed] = useState<string[]>([]); // rotating feed for AITextLoading
-  type Mode = 'idle' | 'listening' | 'speaking' | 'thinking';
+  type Mode = 'idle' | 'speaking' | 'thinking';
   const [mode, setMode] = useState<Mode>('idle');
   const speakTimerRef = useRef<number | null>(null);
-  const prevModeRef = useRef<Mode>('idle');
 
   const onWsMessage = useCallback((data: any) => {
     if (data?.event) {
@@ -64,7 +64,7 @@ export default function SessionDetail() {
       const lower = name.toLowerCase();
       const labelFor = (toolLower: string, original: string) => {
         if (toolLower.includes('topicclarifier')) return 'Réflexion en cours…';
-        if (toolLower.includes('resport') || toolLower.includes('reportsynth') || toolLower.includes('report')) return 'Génération du rapport…';
+        if (toolLower.includes('report')) return 'Génération du rapport…';
         if (toolLower.includes('memorymanager')) return 'Mise à jour de la mémoire…';
         if (toolLower.includes('search_memories')) return 'Recherche en mémoire…';
         return `Appel d’outil: ${original || 'inconnu'}`;
@@ -72,19 +72,17 @@ export default function SessionDetail() {
       if (data.event === 'function_call') {
         const label = labelFor(lower, name);
         setToolLabel(label);
-        // Do not accumulate feed anymore; just show the current label via mode
-        prevModeRef.current = isMicOn ? 'listening' : 'idle';
         setMode('thinking');
       } else if (data.event === 'function_response') {
         // Clear indicator when a tool finishes and revert to baseline
         setToolLabel('');
-        // If the model is (or was just) speaking, prefer speaking; otherwise listening/idle
+        // If the model is (or was just) speaking, prefer speaking; otherwise idle
         if (speakTimerRef.current) {
           setMode('speaking');
           window.clearTimeout(speakTimerRef.current);
-          speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 800);
+          speakTimerRef.current = window.setTimeout(() => setMode('idle'), 800);
         } else {
-          setMode(isMicOn ? 'listening' : 'idle');
+          setMode('idle');
         }
       }
       addLog(LogLevel.Event, data.event, data.name || data.data);
@@ -99,13 +97,13 @@ export default function SessionDetail() {
       // Clear partials at end of turn
       setPartialBuffer('');
       setToolFeed([]);
-      // Prefer speaking if audio frames arrived very recently, else listening/idle
+      // Prefer speaking if audio frames arrived very recently, else idle
       if (speakTimerRef.current) {
         setMode('speaking');
         window.clearTimeout(speakTimerRef.current);
-        speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 800);
+        speakTimerRef.current = window.setTimeout(() => setMode('idle'), 800);
       } else {
-        setMode(isMicOn ? 'listening' : 'idle');
+        setMode('idle');
       }
       return;
     }
@@ -114,7 +112,7 @@ export default function SessionDetail() {
         playAudioChunk(data.data);
         setMode('speaking');
         if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
-        speakTimerRef.current = window.setTimeout(() => setMode(isMicOn ? 'listening' : 'idle'), 1200);
+        speakTimerRef.current = window.setTimeout(() => setMode('idle'), 2500);
         return;
       }
       if (typeof data.data === 'string' && data.mime_type === 'text/plain') {
@@ -144,8 +142,21 @@ export default function SessionDetail() {
 
   // Manual connect only via UI controls to avoid auto-reconnect behavior
   React.useEffect(() => {
-    setMode(isMicOn ? 'listening' : 'idle');
+    setMode('idle');
   }, [isMicOn]);
+
+  // Derive a single source of truth for the events display
+  const getEventTexts = (): string[] => {
+    // Connection state takes precedence
+    if (wsStatus === WsStatus.Connecting) return ['Connexion…'];
+    if (wsStatus === WsStatus.Disconnected) return ['Déconnecté'];
+    if (wsStatus === WsStatus.Error) return ['Erreur de connexion'];
+    // When connected, show by mode
+    if (mode === 'thinking') return [toolLabel || 'Réflexion en cours…'];
+    if (mode === 'speaking') return ['Synthèse de parole…'];
+    // no dedicated listening state anymore
+    return ['En attente'];
+  };
 
   // Reset local loading flags on status changes
   React.useEffect(() => {
@@ -165,7 +176,7 @@ export default function SessionDetail() {
 
       <div className="flex-grow overflow-hidden">
         <div className="grid grid-cols-5 gap-4 h-full">
-          <div className="col-span-4 h-full">
+          <div className="col-span-5 h-full">
             <Card className="h-full">
               <CardHeader>
                 <CardTitle>Événements</CardTitle>
@@ -173,35 +184,7 @@ export default function SessionDetail() {
               <CardContent className="overflow-hidden h-[calc(100%-3rem)] flex flex-col gap-4">
                 {/* Events panel now only uses AITextLoading */}
                 <div className="flex-1 overflow-auto bg-background border rounded-md p-4">
-                  <AITextLoading
-                    texts={
-                      mode === 'thinking'
-                        ? [toolLabel || 'Réflexion en cours…']
-                        : mode === 'speaking'
-                          ? ['Synthèse de parole…']
-                          : mode === 'listening'
-                            ? ['À l’écoute']
-                            : ['En attente']
-                    }
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-          <div className="col-span-1 h-full">
-            <Card className="h-full flex flex-col">
-              <CardHeader className="flex-shrink-0">
-                <CardTitle>Logs</CardTitle>
-              </CardHeader>
-              <CardContent className="flex-grow overflow-auto">
-                <div className="text-xs font-mono space-y-1 pr-2">
-                  {logs.map(l => (
-                    <div key={l.id} className="flex gap-2 items-start">
-                      <span className="text-muted-foreground whitespace-nowrap">{l.timestamp}</span>
-                      <span className="font-bold">[{l.level}]</span>
-                      <span className="break-all whitespace-pre-wrap">{l.message}</span>
-                    </div>
-                  ))}
+                  <AITextLoading texts={getEventTexts()} />
                 </div>
               </CardContent>
             </Card>
@@ -224,7 +207,7 @@ export default function SessionDetail() {
                     // Turn on streaming to backend, keep mic device untouched
                     setStreamingEnabled(true);
                     setIsMicOn(true);
-                    setMode('listening');
+                    setMode('idle');
                   } else {
                     // Pause upstream without stopping microphone hardware
                     setStreamingEnabled(false);
