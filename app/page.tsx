@@ -301,7 +301,7 @@ export default function Home() {
                     >
                       <AccordionItem value="main_report" className="rounded-md border">
                         <AccordionTrigger className="w-full text-left text-lg font-semibold px-4 py-3">Rapport principal</AccordionTrigger>
-                        <AccordionContent className="px-4 pb-4">
+                        <AccordionContent className="px-4 pb-4 pt-3 border-t">
                           <div className="space-y-2 text-sm">
                             <div><span className="font-medium">Titre :</span> {selectedSession.state.RapportDeSortie.main_report?.title}</div>
                             <div><span className="font-medium">Date :</span> {selectedSession.state.RapportDeSortie.main_report?.date_of_visit}</div>
@@ -315,7 +315,7 @@ export default function Home() {
                       {selectedSession.state.RapportDeSortie.strategic_dashboard && (
                         <AccordionItem value="strategic_dashboard" className="rounded-md border">
                           <AccordionTrigger className="w-full text-left text-lg font-semibold px-4 py-3">Tableau de bord stratégique</AccordionTrigger>
-                          <AccordionContent className="px-4 pb-4">
+                          <AccordionContent className="px-4 pb-4 pt-3 border-t">
                             <Accordion
                               className="space-y-3"
                               transition={{ duration: 0.2, ease: 'easeInOut' }}
@@ -329,24 +329,28 @@ export default function Home() {
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights && (
                                 <AccordionItem value="proactive_insights" className="rounded border">
                                   <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Synthèse proactive</AccordionTrigger>
-                                  <AccordionContent className="px-3 pb-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                      <div>
-                                        <div className="text-sm font-medium mb-1">Points identifiés</div>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
-                                            <li key={`pi-ii-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <div className="text-sm font-medium mb-1">Pistes/solutions</div>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
-                                            <li key={`pi-ps-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
+                                  <AccordionContent className="px-3 pb-3 pt-3 border-t">
+                                    <div className="space-y-4">
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <div className="text-sm font-medium">Points identifiés</div>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
+                                              <li key={`pi-ii-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <div className="text-sm font-medium">Pistes/solutions</div>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
+                                              <li key={`pi-ps-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -355,24 +359,28 @@ export default function Home() {
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan && (
                                 <AccordionItem value="action_plan" className="rounded border">
                                   <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Plan d'action</AccordionTrigger>
-                                  <AccordionContent className="px-3 pb-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                      <div>
-                                        <h4 className="font-medium">Plan d'action – TC</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
-                                            <li key={`ap-tc-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Plan d'action – Agriculteur</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
-                                            <li key={`ap-farmer-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
+                                  <AccordionContent className="px-3 pb-3 pt-3 border-t">
+                                    <div className="space-y-4">
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Plan d'action – TC</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
+                                              <li key={`ap-tc-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Plan d'action – Agriculteur</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
+                                              <li key={`ap-farmer-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -381,32 +389,38 @@ export default function Home() {
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
                                 <AccordionItem value="opportunity_detector" className="rounded border">
                                   <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Détecteur d'opportunités</AccordionTrigger>
-                                  <AccordionContent className="px-3 pb-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                      <div>
-                                        <h4 className="font-medium">Opportunités (ventes)</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.map((i: string, idx: number) => (
-                                            <li key={`od-sales-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Conseils</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.map((i: string, idx: number) => (
-                                            <li key={`od-adv-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Projets agriculteur</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
-                                            <li key={`od-fp-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
+                                  <AccordionContent className="px-3 pb-3 pt-3 border-t">
+                                    <div className="space-y-4">
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Opportunités (ventes)</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.map((i: string, idx: number) => (
+                                              <li key={`od-sales-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Conseils</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.map((i: string, idx: number) => (
+                                              <li key={`od-adv-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Projets agriculteur</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
+                                              <li key={`od-fp-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -415,32 +429,38 @@ export default function Home() {
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis && (
                                 <AccordionItem value="risk_analysis" className="rounded border">
                                   <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Analyse des risques</AccordionTrigger>
-                                  <AccordionContent className="px-3 pb-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                      <div>
-                                        <h4 className="font-medium">Risque commercial</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.map((i: string, idx: number) => (
-                                            <li key={`risk-com-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Risque technique</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.map((i: string, idx: number) => (
-                                            <li key={`risk-tech-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Signaux faibles</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.map((i: string, idx: number) => (
-                                            <li key={`risk-ws-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
+                                  <AccordionContent className="px-3 pb-3 pt-3 border-t">
+                                    <div className="space-y-4">
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Risque commercial</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.map((i: string, idx: number) => (
+                                              <li key={`risk-com-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Risque technique</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.map((i: string, idx: number) => (
+                                              <li key={`risk-tech-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Signaux faibles</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.map((i: string, idx: number) => (
+                                              <li key={`risk-ws-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -449,32 +469,38 @@ export default function Home() {
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer && (
                                 <AccordionItem value="relationship_barometer" className="rounded border">
                                   <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Baromètre de la relation</AccordionTrigger>
-                                  <AccordionContent className="px-3 pb-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                      <div>
-                                        <h4 className="font-medium">Points de satisfaction</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
-                                            <li key={`rel-sat-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Points de frustration</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
-                                            <li key={`rel-frus-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Notes personnelles</h4>
-                                        <ul className="list-disc pl-5 text-sm space-y-1">
-                                          {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
-                                            <li key={`rel-notes-${idx}`}>{i}</li>
-                                          ))}
-                                        </ul>
-                                      </div>
+                                  <AccordionContent className="px-3 pb-3 pt-3 border-t">
+                                    <div className="space-y-4">
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Points de satisfaction</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
+                                              <li key={`rel-sat-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Points de frustration</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
+                                              <li key={`rel-frus-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {((selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.length ?? 0) > 0) && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Notes personnelles</h4>
+                                          <ul className="list-disc pl-5 text-sm space-y-1">
+                                            {selectedSession.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
+                                              <li key={`rel-notes-${idx}`}>{i}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
@@ -483,16 +509,20 @@ export default function Home() {
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep && (
                                 <AccordionItem value="next_contact_prep" className="rounded border">
                                   <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Préparation du prochain contact</AccordionTrigger>
-                                  <AccordionContent className="px-3 pb-3">
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                      <div>
-                                        <h4 className="font-medium">Sujet d'ouverture</h4>
-                                        <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
-                                      </div>
-                                      <div>
-                                        <h4 className="font-medium">Objectif de la prochaine visite</h4>
-                                        <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective}</p>
-                                      </div>
+                                  <AccordionContent className="px-3 pb-3 pt-3 border-t">
+                                    <div className="space-y-4">
+                                      {(typeof selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic === 'string' && selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic.trim() !== '') && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Sujet d'ouverture</h4>
+                                          <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
+                                        </div>
+                                      )}
+                                      {(typeof selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective === 'string' && selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective.trim() !== '') && (
+                                        <div className="space-y-1">
+                                          <h4 className="font-medium">Objectif de la prochaine visite</h4>
+                                          <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective}</p>
+                                        </div>
+                                      )}
                                     </div>
                                   </AccordionContent>
                                 </AccordionItem>
