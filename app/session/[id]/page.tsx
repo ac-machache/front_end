@@ -27,13 +27,13 @@ export default function SessionDetail() {
   React.useEffect(() => {
     const id = params?.id as string;
     if (id && config.sessionId !== id) setConfig(prev => ({ ...prev, sessionId: id }));
-  }, [params?.id]);
+  }, [params?.id, config.sessionId, setConfig]);
 
   React.useEffect(() => {
     setIsHydrated(true);
   }, []);
 
-  const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
+  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
     setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
   }, []);
 
@@ -225,8 +225,9 @@ export default function SessionDetail() {
                     try {
                       await startMic();
                       connect();
-                    } catch (e) {
+                    } catch (err) {
                       setIsConnecting(false);
+                      addLog(LogLevel.Error, 'Failed to connect', err);
                     }
                   }}
                   className="w-full"

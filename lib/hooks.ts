@@ -1,6 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Config, LogEntry, LogLevel, WsStatus } from './types';
+import type { Config, LogLevel, WsStatus } from './types';
 import { LogLevel as LogLevelEnum, WsStatus as WsStatusEnum } from './types';
 import { buildHttpUrl, arrayBufferToBase64, base64ToUint8Array } from './utils';
 // Use the same JS modules as the original app, served from /public/js
@@ -38,9 +38,8 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
       const text = await response.text();
       const data = text ? JSON.parse(text) : null;
       if (!response.ok) {
-        const err = new Error(`HTTP ${response.status}`);
-        // @ts-expect-error attach cause for logging only
-        (err as { cause?: unknown }).cause = data;
+        const err = new Error(`HTTP ${response.status}`) as Error & { cause?: unknown };
+        err.cause = data;
         throw err;
       }
       addLog(LogLevelEnum.Http, `Success: ${response.status}`, data);
@@ -198,7 +197,7 @@ export function useAudioProcessor(
       const message = err instanceof Error ? err.message : String(err);
       addLog(LogLevelEnum.Error, `Error starting microphone: ${message}`, err);
     }
-  }, [addLog, onMicData]);
+  }, [addLog, onMicData, onLevel]);
 
   const stopMic = useCallback(() => {
     if (recorderNode.current) { recorderNode.current.disconnect(); recorderNode.current = null; }
