@@ -1,27 +1,27 @@
 "use client";
-import React, { useMemo, useRef, useState, useCallback } from 'react';
+import React, { Suspense, useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
-import type { Config, Session } from '@/lib/types';
+import type { Config, Session, SessionDetails } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
 import { useLocalStorage, useApiClient } from '@/lib/hooks';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 type Page = 'config' | 'list' | 'detail';
 
-export default function Home() {
+function HomeContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [currentPage, setCurrentPage] = useState<Page>('config');
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'ws', host: 'localhost', port: '8080', appName: 'app', userId: 'user', sessionId: '' });
   const [environment, setEnvironment] = useLocalStorage<'local' | 'cloud'>('app-environment', 'local');
-  const [apiResult, setApiResult] = useState<any>(null); // Sessions list or other API responses
+  const [apiResult, setApiResult] = useState<SessionDetails[] | null>(null);
   const [apiResultTitle, setApiResultTitle] = useState('Espace session');
-  const [selectedSession, setSelectedSession] = useState<any | null>(null);
+  const [selectedSession, setSelectedSession] = useState<SessionDetails | null>(null);
   const [isLoadingSession, setIsLoadingSession] = useState(false);
   // Logs removed from UI; keep a minimal logger
   const [isCreating, setIsCreating] = useState(false);
@@ -31,7 +31,7 @@ export default function Home() {
   const [expandedStrategicSection, setExpandedStrategicSection] = useState<React.Key | null>('proactive_insights');
   const [reportReadyById, setReportReadyById] = useState<Record<string, boolean>>({});
 
-  const addLog = useCallback((level: LogLevel, message: string, data?: any) => {
+  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
     if (process.env.NODE_ENV !== 'production') {
       try { console.debug(`[${level}] ${message}`, data ?? ''); } catch {}
     }
@@ -39,11 +39,15 @@ export default function Home() {
 
   const apiClient = useApiClient(config, addLog);
 
-  const handleApiResponse = (title: string, data: any) => {
+  const handleApiResponse = (title: string, data: unknown) => {
     if (!data) return;
     setApiResultTitle(title);
-    setApiResult(data);
-    if (title.startsWith('Create Session') && data.id) setConfig(prev => ({ ...prev, sessionId: data.id }));
+    const maybeSessions = Array.isArray(data) ? (data as SessionDetails[]) : null;
+    setApiResult(maybeSessions);
+    if (title.startsWith('Create Session')) {
+      const created = data as Session | null;
+      if (created?.id) setConfig(prev => ({ ...prev, sessionId: created.id }));
+    }
   };
 
   const handleGoToSession = (sessionId: string) => {
@@ -86,8 +90,8 @@ export default function Home() {
       handleApiResponse('Session List', data);
       if (Array.isArray(data)) {
         const statusMap: Record<string, boolean> = {};
-        for (const s of data as any[]) {
-          statusMap[s.id] = !!(s?.state?.RapportDeSortie);
+        for (const s of data as SessionDetails[]) {
+          statusMap[s.id] = !!(s?.state && s.state.RapportDeSortie);
         }
         setReportReadyById(statusMap);
       }
@@ -101,20 +105,12 @@ export default function Home() {
     setSelectedSession(null);
     setIsLoadingSession(true);
     try {
-      const details = await apiClient.getSession(sessionId);
-      setSelectedSession(details);
+      const details = await apiClient.getSession(sessionId) as SessionDetails | null;
+      if (details) setSelectedSession(details);
       setApiResultTitle('Rapport de Visite');
     } finally {
       setIsLoadingSession(false);
     }
-  };
-
-  const formatTs = (ts?: string) => {
-    if (!ts) return 'N/A';
-    const n = typeof ts === 'string' ? parseFloat(ts) : Number(ts);
-    if (!isFinite(n)) return ts;
-    const d = new Date(n * 1000);
-    return d.toLocaleString();
   };
 
   const formatRelativeTime = (ts?: string | number) => {
@@ -134,7 +130,7 @@ export default function Home() {
     return d.toLocaleDateString();
   };
 
-  const getSessionTitle = (s: any) => {
+  const getSessionTitle = (s: SessionDetails) => {
     const mr = s?.state?.RapportDeSortie?.main_report;
     if (mr?.title) return mr.title;
     const tc = s?.state?.nom_tc || 'TC ?';
@@ -142,7 +138,7 @@ export default function Home() {
     return `Visite: ${tc} → ${ag}`;
   };
 
-  const getSessionSubtitle = (s: any) => {
+  const getSessionSubtitle = (s: SessionDetails) => {
     const mr = s?.state?.RapportDeSortie?.main_report;
     if (mr?.date_of_visit) return `Visite du ${mr.date_of_visit}`;
     return `Mis à jour ${formatRelativeTime(s?.lastUpdateTime)}`;
@@ -251,7 +247,7 @@ export default function Home() {
                 </Button>
                 <div className="space-y-2">
                 {Array.isArray(apiResult) && apiResult.length > 0 ? (
-                  apiResult.map((s: any) => (
+                  apiResult.map((s: SessionDetails) => (
                     <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2 gap-3">
                       <div className="min-w-0">
                         <div className="text-sm font-medium truncate">{getSessionTitle(s)}</div>
@@ -267,7 +263,7 @@ export default function Home() {
                     </div>
                   ))
                 ) : (
-                  <p className="text-sm text-muted-foreground">Aucune visite. Cliquez sur "Actualiser la liste".</p>
+                  <p className="text-sm text-muted-foreground">Aucune visite. Cliquez sur &quot;Actualiser la liste&quot;.</p>
                 )}
                 </div>
               </div>
@@ -358,12 +354,12 @@ export default function Home() {
 
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan && (
                                 <AccordionItem value="action_plan" className="rounded border">
-                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Plan d'action</AccordionTrigger>
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Plan d&rsquo;action</AccordionTrigger>
                                   <AccordionContent className="px-3 pb-3 pt-3 border-t">
                                     <div className="space-y-4">
                                       {((selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.length ?? 0) > 0) && (
                                         <div className="space-y-1">
-                                          <h4 className="font-medium">Plan d'action – TC</h4>
+                                          <h4 className="font-medium">Plan d&rsquo;action – TC</h4>
                                           <ul className="list-disc pl-5 text-sm space-y-1">
                                             {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
                                               <li key={`ap-tc-${idx}`}>{i}</li>
@@ -373,7 +369,7 @@ export default function Home() {
                                       )}
                                       {((selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.length ?? 0) > 0) && (
                                         <div className="space-y-1">
-                                          <h4 className="font-medium">Plan d'action – Agriculteur</h4>
+                                          <h4 className="font-medium">Plan d&rsquo;action – Agriculteur</h4>
                                           <ul className="list-disc pl-5 text-sm space-y-1">
                                             {selectedSession.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
                                               <li key={`ap-farmer-${idx}`}>{i}</li>
@@ -388,7 +384,7 @@ export default function Home() {
 
                               {selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
                                 <AccordionItem value="opportunity_detector" className="rounded border">
-                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Détecteur d'opportunités</AccordionTrigger>
+                                  <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Détecteur d&rsquo;opportunités</AccordionTrigger>
                                   <AccordionContent className="px-3 pb-3 pt-3 border-t">
                                     <div className="space-y-4">
                                       {((selectedSession.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.length ?? 0) > 0) && (
@@ -513,7 +509,7 @@ export default function Home() {
                                     <div className="space-y-4">
                                       {(typeof selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic === 'string' && selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic.trim() !== '') && (
                                         <div className="space-y-1">
-                                          <h4 className="font-medium">Sujet d'ouverture</h4>
+                                          <h4 className="font-medium">Sujet d&rsquo;ouverture</h4>
                                           <p className="text-sm whitespace-pre-wrap">{selectedSession.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
                                         </div>
                                       )}
@@ -534,7 +530,7 @@ export default function Home() {
                     </Accordion>
                   ) : (
                     <div className="space-y-3">
-                      <div className="text-sm">La session n'est pas terminée. Aucun rapport généré pour l'instant.</div>
+                      <div className="text-sm">La session n&rsquo;est pas terminée. Aucun rapport généré pour l&rsquo;instant.</div>
                       <Button onClick={() => handleGoToSession(selectedSession.id)}>Ouvrir le temps réel</Button>
                     </div>
                   )}
@@ -545,5 +541,13 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Chargement…</div>}>
+      <HomeContent />
+    </Suspense>
   );
 }

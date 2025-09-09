@@ -9,7 +9,7 @@ import AIVoice from '@/components/kokonutui/ai-voice';
 import AITextLoading from '@/components/kokonutui/ai-text-loading';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
-import { useLocalStorage, useApiClient, useWebSocket, useAudioProcessor } from '@/lib/hooks';
+import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
 import { buildWsUrl } from '@/lib/utils';
 
 export default function SessionDetail() {
@@ -38,29 +38,28 @@ export default function SessionDetail() {
   }, []);
 
   const wsUrl = useMemo(() => buildWsUrl(config), [config]);
-  const apiClient = useApiClient(config, addLog);
+  // No HTTP calls here; realtime over WebSocket only
 
   const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
 
   // Bridge sendMessage to audio hook without TDZ issues
-  const sendMessageRef = useRef<(data: any) => void>(() => {});
+  const sendMessageRef = useRef<(data: unknown) => void>(() => {});
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const [micLevel, setMicLevel] = useState<number>(0);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog, (lvl) => setMicLevel(lvl));
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
   // Transcription display disabled for now
   const [toolLabel, setToolLabel] = useState<string>('');
-  const [partialBuffer, setPartialBuffer] = useState<string>('');
-  const [toolFeed, setToolFeed] = useState<string[]>([]); // rotating feed for AITextLoading
   type Mode = 'idle' | 'speaking' | 'thinking';
   const [mode, setMode] = useState<Mode>('idle');
   const speakTimerRef = useRef<number | null>(null);
 
-  const onWsMessage = useCallback((data: any) => {
-    if (data?.event) {
+  type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
+  const onWsMessage = useCallback((data: unknown) => {
+    const msg = data as WireMessage;
+    if (msg?.event) {
       // Handle function call/response indicators
-      const name: string = (data?.name || '') as string;
+      const name: string = (msg?.name || '') as string;
       const lower = name.toLowerCase();
       const labelFor = (toolLower: string, original: string) => {
         if (toolLower.includes('topicclarifier')) return 'Réflexion en cours…';
@@ -69,11 +68,11 @@ export default function SessionDetail() {
         if (toolLower.includes('search_memories')) return 'Recherche en mémoire…';
         return `Appel d’outil: ${original || 'inconnu'}`;
       };
-      if (data.event === 'function_call') {
+      if (msg.event === 'function_call') {
         const label = labelFor(lower, name);
         setToolLabel(label);
         setMode('thinking');
-      } else if (data.event === 'function_response') {
+      } else if (msg.event === 'function_response') {
         // Clear indicator when a tool finishes and revert to baseline
         setToolLabel('');
         // If the model is (or was just) speaking, prefer speaking; otherwise idle
@@ -85,18 +84,15 @@ export default function SessionDetail() {
           setMode('idle');
         }
       }
-      addLog(LogLevel.Event, data.event, data.name || data.data);
+      addLog(LogLevel.Event, msg.event, msg.name || msg.data);
       return;
     }
-    if (data?.turn_complete !== undefined || data?.interrupted !== undefined) {
-      addLog(LogLevel.Event, 'Turn Control', data);
-      if (data?.interrupted) {
+    if (msg?.turn_complete !== undefined || msg?.interrupted !== undefined) {
+      addLog(LogLevel.Event, 'Turn Control', msg);
+      if (msg?.interrupted) {
         clearPlaybackQueue();
       }
       setToolLabel('');
-      // Clear partials at end of turn
-      setPartialBuffer('');
-      setToolFeed([]);
       // Prefer speaking if audio frames arrived very recently, else idle
       if (speakTimerRef.current) {
         setMode('speaking');
@@ -107,23 +103,18 @@ export default function SessionDetail() {
       }
       return;
     }
-    if (data?.mime_type && data?.data) {
-      if (data.mime_type.startsWith('audio/')) {
-        playAudioChunk(data.data);
+    if (msg?.mime_type && msg?.data) {
+      if (msg.mime_type.startsWith('audio/')) {
+        playAudioChunk(msg.data as string);
         setMode('speaking');
         if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
         speakTimerRef.current = window.setTimeout(() => setMode('idle'), 2500);
         return;
       }
-      if (typeof data.data === 'string' && data.mime_type === 'text/plain') {
-        // skip showing transcription for now
-        setPartialBuffer(data.data);
-        return;
-      }
     }
     // Do not log unhandled messages
     // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue, isMicOn, mode]);
+  }, [addLog, playAudioChunk, clearPlaybackQueue]);
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
     // Always release microphone hardware and reset streaming gate on close
@@ -131,13 +122,13 @@ export default function SessionDetail() {
     setStreamingEnabled(false);
     setIsMicOn(false);
     setMode('idle');
-  }, [addLog, stopMic]);
+  }, [addLog, stopMic, setStreamingEnabled]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
 
   // Keep ref in sync once hook returns sendMessage
   React.useEffect(() => {
-    sendMessageRef.current = (data: any) => sendMessage(data);
+    sendMessageRef.current = (data: unknown) => sendMessage(data);
   }, [sendMessage]);
 
   // Manual connect only via UI controls to avoid auto-reconnect behavior
