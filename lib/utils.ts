@@ -7,6 +7,12 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // URL helpers
+function sanitizeHost(host: string): string {
+  // Strip protocol and any trailing path or slash
+  const noProto = host.replace(/^https?:\/\//i, '');
+  return noProto.split('/')[0].trim();
+}
+
 export function buildHttpUrl(config: Config): string {
   // If host is localhost, use the Next.js proxy.
   if (config.host === 'localhost') {
@@ -14,8 +20,9 @@ export function buildHttpUrl(config: Config): string {
   }
   // Otherwise, build the full URL for cloud environments.
   const protocol = config.scheme === 'wss' ? 'https' : 'http';
+  const host = sanitizeHost(config.host);
   const port = (protocol === 'https' && config.port === '443') || (protocol === 'http' && config.port === '80') ? '' : `:${config.port}`;
-  return `${protocol}://${config.host}${port}`;
+  return `${protocol}://${host}${port}`;
 }
 
 export function buildWsUrl(config: Config): string {
@@ -26,8 +33,9 @@ export function buildWsUrl(config: Config): string {
     return `${protocol}://${host}/api/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
   }
   // Otherwise, build the full URL for cloud environments.
+  const host = sanitizeHost(config.host);
   const port = (config.scheme === 'wss' && config.port === '443') || (config.scheme === 'ws' && config.port === '80') ? '' : `:${config.port}`;
-  return `${config.scheme}://${config.host}${port}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  return `${config.scheme}://${host}${port}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
 }
 
 // base64 helpers

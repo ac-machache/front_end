@@ -94,6 +94,9 @@ function HomeContent() {
           statusMap[s.id] = !!(s?.state && s.state.RapportDeSortie);
         }
         setReportReadyById(statusMap);
+      } else if (data == null) {
+        setApiResultTitle('Erreur API');
+        setApiResult(null);
       }
     } finally {
       setIsListing(false);
