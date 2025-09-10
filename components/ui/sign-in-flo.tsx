@@ -90,7 +90,7 @@ const AnimatedFormField: React.FC<FormFieldProps> = ({
   );
 };
 
-const SocialButton: React.FC<{ icon: React.ReactNode; name: string }> = ({ icon, name }) => {
+const SocialButton: React.FC<{ icon: React.ReactNode; name?: string }> = ({ icon }) => {
   const [isHovered, setIsHovered] = useState(false);
 
   return (

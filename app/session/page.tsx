@@ -15,11 +15,12 @@ type ClientDoc = { id: string; name?: string; email?: string };
 
 export default function SessionsPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
+  // Wrap useSearchParams usage behind local state to satisfy build-time SSR bailouts
+  const params = useSearchParams();
   const { user, loading } = useAuth();
 
   // clientId provenant de /session?clientId=xxx
-  const clientId = searchParams?.get('clientId') || '';
+  const clientId = typeof window !== 'undefined' ? (params?.get('clientId') || '') : '';
 
   // États UI (anciens)
   const [apiResultTitle, setApiResultTitle] = React.useState('Espace session');
@@ -42,6 +43,23 @@ export default function SessionsPage() {
     if (!loading && !user) router.replace('/welcome');
   }, [loading, user, router]);
 
+  // Logger minimal
+  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
+    if (process.env.NODE_ENV !== 'production') {
+      try { console.debug(`[${level}] ${message}`, data ?? ''); } catch {}
+    }
+  }, []);
+
+  // IMPORTANT: on adresse le backend sous l'utilisateur du CLIENT (userId = clientId)
+  const apiClient = useApiClient({
+    scheme: (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss' : 'ws',
+    host: 'env',
+    port: '0',
+    appName: 'app',
+    userId: clientId || 'user',
+    sessionId: ''
+  }, addLog);
+
   // Charger le doc client + la liste des sessions Firestore
   const refreshSessions = useCallback(async () => {
     if (!user || !clientId) {
@@ -57,9 +75,9 @@ export default function SessionsPage() {
 
       // Récupérer les sessions du client depuis Firestore
       const list = await listSessionsForClient(user.uid, clientId);
-      const minimal = (list as Array<{ id: string; is_report_done?: boolean }>).map((d) => ({
+      const minimal = (list as Array<{ id: string; is_report_done?: boolean }>).map((d: { id: string; is_report_done?: boolean }) => ({
         id: d.id,
-        is_report_done: (d as any).is_report_done ?? false,
+        is_report_done: d.is_report_done ?? false,
       }));
       setFirestoreSessions(minimal);
 
@@ -93,26 +111,11 @@ export default function SessionsPage() {
     } finally {
       setIsListing(false);
     }
-  }, [user, clientId]);
+  }, [user, clientId, apiClient]);
 
   React.useEffect(() => { refreshSessions(); }, [refreshSessions]);
 
-  // Logger minimal
-  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
-    if (process.env.NODE_ENV !== 'production') {
-      try { console.debug(`[${level}] ${message}`, data ?? ''); } catch {}
-    }
-  }, []);
-
-  // IMPORTANT: on adresse le backend sous l'utilisateur du CLIENT (userId = clientId)
-  const apiClient = useApiClient({
-    scheme: (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss' : 'ws',
-    host: 'env',
-    port: '0',
-    appName: 'app',
-    userId: clientId || 'user',
-    sessionId: ''
-  } as any, addLog);
+  
 
   const handleGoToSession = (sessionId: string) => { router.push(`/session/${sessionId}?clientId=${clientId}`); };
 

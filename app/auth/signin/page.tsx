@@ -27,8 +27,9 @@ export default function SignInPage() {
       const auth = getFirebaseAuth();
       if (!auth) throw new Error('Authentification non initialisée');
       await signInWithEmailAndPassword(auth, email, password);
-    } catch (err: any) {
-      alert(`Erreur: ${err.message ?? 'Impossible de se connecter'}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Erreur: ${message || 'Impossible de se connecter'}`);
     }
   };
 

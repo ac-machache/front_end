@@ -34,8 +34,9 @@ export default function SignUpPage() {
         { uid: u.uid, email: u.email, displayName: `${firstName} ${lastName}` },
         { nameOverride: `${firstName} ${lastName}` }
       );
-    } catch (err: any) {
-      alert(`Erreur: ${err.message ?? 'Impossible de créer le compte'}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Erreur: ${message || 'Impossible de créer le compte'}`);
     }
   };
 
@@ -50,8 +51,9 @@ export default function SignUpPage() {
         const u = result.user;
         await ensureUserInitialized({ uid: u.uid, email: u.email, displayName: u.displayName, photoURL: u.photoURL });
       }
-    } catch (err: any) {
-      alert(`Erreur: ${err.message ?? 'Impossible de créer le compte avec Google'}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      alert(`Erreur: ${message || 'Impossible de créer le compte avec Google'}`);
     }
   };
 

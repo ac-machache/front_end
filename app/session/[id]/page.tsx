@@ -4,9 +4,8 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
-import AIVoice from '@/components/kokonutui/ai-voice';
 // removed Loader2-based status row in events panel
-import AITextLoading from '@/components/kokonutui/ai-text-loading';
+import IAdvisor from '@/components/kokonutui/IAdvisor';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
@@ -21,7 +20,7 @@ export default function SessionDetail() {
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
   const [, setLogs] = useState<LogEntry[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
-  const [isHydrated, setIsHydrated] = useState(false);
+  // const [isHydrated, setIsHydrated] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const logCounter = useRef(0);
@@ -38,9 +37,7 @@ export default function SessionDetail() {
     if (cid && config.userId !== cid) setConfig(prev => ({ ...prev, userId: cid }));
   }, [clientIdParam, config.userId, setConfig]);
 
-  React.useEffect(() => {
-    setIsHydrated(true);
-  }, []);
+  // React.useEffect(() => { setIsHydrated(true); }, []);
 
   const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
     setLogs(prev => [...prev, { id: logCounter.current++, level, message, data, timestamp: new Date().toLocaleTimeString() }]);
@@ -56,12 +53,14 @@ export default function SessionDetail() {
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
+  const [rms01, setRms01] = useState(0);
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog, (lvl) => setRms01(lvl));
   // Transcription display disabled for now
-  const [toolLabel, setToolLabel] = useState<string>('');
+  // const [toolLabel, setToolLabel] = useState<string>('');
   type Mode = 'idle' | 'speaking' | 'thinking';
   const [mode, setMode] = useState<Mode>('idle');
   const speakTimerRef = useRef<number | null>(null);
+  const reportToolPendingRef = useRef<boolean>(false);
 
   type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
   const onWsMessage = useCallback((data: unknown) => {
@@ -70,20 +69,21 @@ export default function SessionDetail() {
       // Handle function call/response indicators
       const name: string = (msg?.name || '') as string;
       const lower = name.toLowerCase();
-      const labelFor = (toolLower: string, original: string) => {
-        if (toolLower.includes('topicclarifier')) return 'Réflexion en cours…';
-        if (toolLower.includes('report')) return 'Génération du rapport…';
-        if (toolLower.includes('memorymanager')) return 'Mise à jour de la mémoire…';
-        if (toolLower.includes('search_memories')) return 'Recherche en mémoire…';
-        return `Appel d’outil: ${original || 'inconnu'}`;
-      };
+      const labelFor = (_toolLower: string) => undefined;
       if (msg.event === 'function_call') {
-        const label = labelFor(lower, name);
-        setToolLabel(label);
+        labelFor(lower);
         setMode('thinking');
+        // Pause upstream audio during tool calls (keep mic hardware on)
+        try { setStreamingEnabled(false); } catch {}
+        if (lower.includes('report')) {
+          reportToolPendingRef.current = true;
+        }
       } else if (msg.event === 'function_response') {
         // Clear indicator when a tool finishes and revert to baseline
-        setToolLabel('');
+        // Resume upstream audio unless we are waiting for report tool turn_complete
+        if (!reportToolPendingRef.current) {
+          try { setStreamingEnabled(true); } catch {}
+        }
         // If the model is (or was just) speaking, prefer speaking; otherwise idle
         if (speakTimerRef.current) {
           setMode('speaking');
@@ -101,7 +101,20 @@ export default function SessionDetail() {
       if (msg?.interrupted) {
         clearPlaybackQueue();
       }
-      setToolLabel('');
+      // clear any previous tool indicator
+      // If report tool just finished, stop and go back to list with clientId
+      if (reportToolPendingRef.current) {
+        reportToolPendingRef.current = false;
+        try { disconnect(); } catch {}
+        try { stopMic(); } catch {}
+        try { setStreamingEnabled(false); } catch {}
+        setIsMicOn(false);
+        setMode('idle');
+        router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session');
+        return;
+      }
+      // Otherwise resume upstream
+      try { setStreamingEnabled(true); } catch {}
       // Prefer speaking if audio frames arrived very recently, else idle
       if (speakTimerRef.current) {
         setMode('speaking');
@@ -123,7 +136,7 @@ export default function SessionDetail() {
     }
     // Do not log unhandled messages
     // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue]);
+  }, [addLog, playAudioChunk, clearPlaybackQueue, setStreamingEnabled, router, clientIdParam]);
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
     // Always release microphone hardware and reset streaming gate on close
@@ -145,18 +158,7 @@ export default function SessionDetail() {
     setMode('idle');
   }, [isMicOn]);
 
-  // Derive a single source of truth for the events display
-  const getEventTexts = (): string[] => {
-    // Connection state takes precedence
-    if (wsStatus === WsStatus.Connecting) return ['Connexion…'];
-    if (wsStatus === WsStatus.Disconnected) return ['Déconnecté'];
-    if (wsStatus === WsStatus.Error) return ['Erreur de connexion'];
-    // When connected, show by mode
-    if (mode === 'thinking') return [toolLabel || 'Réflexion en cours…'];
-    if (mode === 'speaking') return ['Synthèse de parole…'];
-    // no dedicated listening state anymore
-    return ['En attente'];
-  };
+  // Events text removed; visual handled by IAdvisor
 
   // Reset local loading flags on status changes
   React.useEffect(() => {
@@ -193,9 +195,23 @@ export default function SessionDetail() {
                 <CardTitle>Événements</CardTitle>
               </CardHeader>
               <CardContent className="overflow-hidden h-[calc(100%-3rem)] flex flex-col gap-4">
-                {/* Events panel now only uses AITextLoading */}
-                <div className="flex-1 overflow-auto bg-background border rounded-md p-4">
-                  <AITextLoading texts={getEventTexts()} />
+                <div className="flex-1 overflow-auto bg-background border rounded-md p-4 flex items-center justify-center">
+                  <IAdvisor
+                    active={isMicOn}
+                    onToggle={() => {
+                      if (!isMicOn) {
+                        setStreamingEnabled(true);
+                        setIsMicOn(true);
+                        setMode('idle');
+                      } else {
+                        setStreamingEnabled(false);
+                        setIsMicOn(false);
+                        setMode('idle');
+                      }
+                    }}
+                    rmsLevel01={rms01}
+                    wsMode={mode === 'thinking' ? 'thinking' : (mode === 'speaking' ? 'responding' : 'idle')}
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -204,34 +220,8 @@ export default function SessionDetail() {
       </div>
 
       <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-4">
-        {/* Left: Micro panel (same width as Events) */}
-        <div className="col-span-1 md:col-span-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg md:text-xl">Micro</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <AIVoice
-                active={isMicOn}
-                onToggle={(next) => {
-                  if (next) {
-                    // Turn on streaming to backend, keep mic device untouched
-                    setStreamingEnabled(true);
-                    setIsMicOn(true);
-                    setMode('idle');
-                  } else {
-                    // Pause upstream without stopping microphone hardware
-                    setStreamingEnabled(false);
-                    setIsMicOn(false);
-                    setMode('idle');
-                  }
-                }}
-              />
-            </CardContent>
-          </Card>
-        </div>
-        {/* Right: Connection panel (same width as Logs) */}
-        <div className="col-span-1 md:sticky md:top-4">
+        {/* Connection panel */}
+        <div className="col-span-1 md:col-span-5 md:sticky md:top-4">
           <Card className="h-full">
             <CardHeader>
               <CardTitle className="text-lg md:text-xl">Connexion</CardTitle>

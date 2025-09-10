@@ -15,7 +15,6 @@ function getConfigFromEnv(): FirebaseWebConfig | null {
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
   if (!apiKey) {
     if (typeof window !== 'undefined') {
-      // eslint-disable-next-line no-console
       console.warn('Firebase not configured. Set NEXT_PUBLIC_FIREBASE_API_KEY and related env vars.');
     }
     return null;

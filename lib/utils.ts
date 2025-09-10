@@ -2,9 +2,10 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { Config } from './types'
 
+// (legacy) env helper no longer used for backend URL; kept for future optional flags
 function env(name: string, fallback = ''): string {
-  if (typeof process !== 'undefined' && process.env && process.env[name]) return process.env[name] as string;
-  if (typeof window !== 'undefined' && (window as any).__ENV && (window as any).__ENV[name]) return (window as any).__ENV[name] as string;
+  if (typeof process !== 'undefined' && process.env && (process.env as Record<string, string | undefined>)[name]) return (process.env as Record<string, string | undefined>)[name] ?? fallback;
+  if (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV && (window as unknown as { __ENV?: Record<string, string> }).__ENV![name]) return (window as unknown as { __ENV?: Record<string, string> }).__ENV![name];
   return fallback;
 }
 
@@ -13,27 +14,26 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // URL helpers
-function sanitizeHost(host: string): string {
-  // Strip protocol and any trailing path or slash
-  const noProto = host.replace(/^https?:\/\//i, '');
-  return noProto.split('/')[0].trim();
-}
+// function sanitizeHost(host: string): string {
+//   const noProto = host.replace(/^https?:\/\//i, '');
+//   return noProto.split('/')[0].trim();
+// }
 
 export function buildHttpUrl(_: Config): string {
   const base =
     process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
-    (typeof window !== 'undefined' && (window as any).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
+    (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
     '';
   if (!base) {
     throw new Error('NEXT_PUBLIC_BACKEND_BASE_URL manquant. Définissez-le dans .env.local');
   }
-  return (base as string).replace(/\/$/, '');
+  return base.replace(/\/$/, '');
 }
 
 export function buildWsUrl(config: Config): string {
   const base =
     process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
-    (typeof window !== 'undefined' && (window as any).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
+    (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
     '';
   if (!base) {
     throw new Error('NEXT_PUBLIC_BACKEND_BASE_URL manquant. Définissez-le dans .env.local');
