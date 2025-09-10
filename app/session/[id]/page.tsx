@@ -11,10 +11,13 @@ import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
 import { buildWsUrl } from '@/lib/utils';
+import { useSearchParams } from 'next/navigation';
 
 export default function SessionDetail() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const clientIdParam = searchParams?.get('clientId') || '';
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
   const [, setLogs] = useState<LogEntry[]>([]);
   const [isMicOn, setIsMicOn] = useState(false);
@@ -28,6 +31,12 @@ export default function SessionDetail() {
     const id = params?.id as string;
     if (id && config.sessionId !== id) setConfig(prev => ({ ...prev, sessionId: id }));
   }, [params?.id, config.sessionId, setConfig]);
+
+  // Ensure userId matches clientId for WS routing
+  React.useEffect(() => {
+    const cid = clientIdParam;
+    if (cid && config.userId !== cid) setConfig(prev => ({ ...prev, userId: cid }));
+  }, [clientIdParam, config.userId, setConfig]);
 
   React.useEffect(() => {
     setIsHydrated(true);
@@ -162,7 +171,9 @@ export default function SessionDetail() {
           <h1 className="text-2xl font-semibold">Session {isHydrated ? (config.sessionId || (params?.id as string) || '') : ''}</h1>
           <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
         </div>
-        <Button variant="secondary" onClick={() => router.replace('/session')}>Retour aux sessions</Button>
+        <Button variant="secondary" onClick={() => router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session')}>
+          Retour aux sessions
+        </Button>
       </div>
 
       <div className="flex-grow overflow-hidden">

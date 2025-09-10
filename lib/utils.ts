@@ -19,25 +19,28 @@ function sanitizeHost(host: string): string {
   return noProto.split('/')[0].trim();
 }
 
-export function buildHttpUrl(config: Config): string {
-  // Prefer env-configured base URL if present
-  const base = env('NEXT_PUBLIC_BACKEND_BASE_URL');
-  if (base) return base.replace(/\/$/, '');
-  // Fallback to proxy
-  return '/api';
+export function buildHttpUrl(_: Config): string {
+  const base =
+    process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
+    (typeof window !== 'undefined' && (window as any).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
+    '';
+  if (!base) {
+    throw new Error('NEXT_PUBLIC_BACKEND_BASE_URL manquant. Définissez-le dans .env.local');
+  }
+  return (base as string).replace(/\/$/, '');
 }
 
 export function buildWsUrl(config: Config): string {
-  const base = env('NEXT_PUBLIC_BACKEND_BASE_URL');
-  if (base) {
-    const proto = base.startsWith('https') ? 'wss' : 'ws';
-    const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    return `${proto}://${host}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  const base =
+    process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
+    (typeof window !== 'undefined' && (window as any).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
+    '';
+  if (!base) {
+    throw new Error('NEXT_PUBLIC_BACKEND_BASE_URL manquant. Définissez-le dans .env.local');
   }
-  // Fallback to proxy
-  const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
-  const host = typeof window !== 'undefined' ? window.location.host : '';
-  return `${protocol}://${host}/api/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  const proto = base.startsWith('https') ? 'wss' : 'ws';
+  const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
+  return `${proto}://${host}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
 }
 
 // base64 helpers
