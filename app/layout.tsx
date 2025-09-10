@@ -17,6 +17,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: 'IAdvisor',
   description: 'Conseil agricole assisté – sessions, comptes clients et audio en temps réel.',
+  viewport: { width: 'device-width', initialScale: 1, maximumScale: 1 },
 };
 
 export default function RootLayout({
@@ -25,7 +26,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="fr">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <AuthProvider>
           <AppNavbar />

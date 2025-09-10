@@ -11,7 +11,7 @@ export default function AppNavbar() {
 
   return (
     <header className="w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60" suppressHydrationWarning>
-      <div className="mx-auto max-w-6xl px-4 h-14 flex items-center justify-between">
+      <div className="mx-auto max-w-6xl px-3 md:px-4 h-12 md:h-14 flex items-center justify-between gap-2 flex-wrap">
         <Link href="/clients" className="flex items-center gap-2 min-w-0">
           <img src="/globe.svg" alt="logo" className="h-6 w-6" />
           <span className="font-semibold truncate">IAdvisor</span>

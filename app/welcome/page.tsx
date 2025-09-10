@@ -8,12 +8,12 @@ export default function WelcomePage() {
   return (
     <div className="flex flex-col items-center justify-center min-h-[calc(100vh-3.5rem)] p-6 text-center">
       <div className="space-y-2">
-        <h1 className="text-4xl md:text-5xl font-bold tracking-tight">Bienvenue sur IAdvisor</h1>
-        <p className="text-muted-foreground max-w-md mx-auto">
+        <h1 className="text-3xl md:text-5xl font-bold tracking-tight">Bienvenue sur IAdvisor</h1>
+        <p className="text-muted-foreground max-w-md mx-auto text-sm md:text-base">
           Connectez‑vous pour continuer ou créez un nouveau compte.
         </p>
       </div>
-      <div className="mt-8 flex flex-col sm:flex-row gap-3">
+      <div className="mt-6 md:mt-8 flex flex-col sm:flex-row gap-3 w-full sm:w-auto">
         <Button size="lg" asChild>
           <Link href="/auth/signin">
             <LogIn className="mr-2 h-4 w-4" /> Se connecter

@@ -65,9 +65,9 @@ export default function ClientsPage() {
 
   return (
     <div className="max-w-4xl mx-auto p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Vos clients</h1>
-        <Button variant="secondary" onClick={refresh} disabled={isLoading}>
+      <div className="flex items-center justify-between gap-3 flex-col sm:flex-row">
+        <h1 className="text-xl md:text-2xl font-semibold">Vos clients</h1>
+        <Button variant="secondary" onClick={refresh} disabled={isLoading} className="w-full sm:w-auto">
           {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Actualiser
         </Button>
       </div>
@@ -92,7 +92,7 @@ export default function ClientsPage() {
               <Input id="clientNotes" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} className="mt-1" placeholder="Notes (optionnel)" />
             </div>
             <div className="md:col-span-3">
-              <Button onClick={onAdd} disabled={isAdding || !newName.trim() || !newEmail.trim()}>
+              <Button onClick={onAdd} disabled={isAdding || !newName.trim() || !newEmail.trim()} className="w-full sm:w-auto">
                 {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />} Ajouter
               </Button>
             </div>

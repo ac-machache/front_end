@@ -164,21 +164,30 @@ export default function SessionDetail() {
     if (wsStatus === WsStatus.Disconnected) setIsDisconnecting(false);
   }, [wsStatus]);
 
+  // UI status pill meta for header
+  const statusMeta = React.useMemo(() => {
+    if (wsStatus === WsStatus.Connected) return { text: 'Connecté', classes: 'bg-emerald-100 text-emerald-700 border border-emerald-200' };
+    if (wsStatus === WsStatus.Connecting || isConnecting) return { text: 'Connexion…', classes: 'bg-amber-100 text-amber-700 border border-amber-200' };
+    if (wsStatus === WsStatus.Error) return { text: 'Erreur', classes: 'bg-red-100 text-red-700 border border-red-200' };
+    return { text: 'Déconnecté', classes: 'bg-gray-100 text-gray-700 border border-gray-200' };
+  }, [wsStatus, isConnecting]);
+
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
-      <div className="flex-shrink-0 flex justify-between items-center mb-4">
-        <div>
-          <h1 className="text-2xl font-semibold">Session {isHydrated ? (config.sessionId || (params?.id as string) || '') : ''}</h1>
-          <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
+      <div className="flex-shrink-0 flex justify-between items-center mb-4 gap-3 flex-col md:flex-row">
+        <div className="w-full">
+          <h1 className="text-xl md:text-2xl font-semibold">Session</h1>
+          <p className="text-sm md:text-base text-muted-foreground">Connexion et dictée audio en temps réel.</p>
+          <div className={`mt-2 inline-flex items-center px-2.5 py-0.5 rounded-md text-xs font-medium ${statusMeta.classes}`}>{statusMeta.text}</div>
         </div>
-        <Button variant="secondary" onClick={() => router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session')}>
+        <Button className="w-full md:w-auto" variant="secondary" onClick={() => router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session')}>
           Retour aux sessions
         </Button>
       </div>
 
       <div className="flex-grow overflow-hidden">
-        <div className="grid grid-cols-5 gap-4 h-full">
-          <div className="col-span-5 h-full">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 h-full">
+          <div className="col-span-1 md:col-span-5 h-full">
             <Card className="h-full">
               <CardHeader>
                 <CardTitle>Événements</CardTitle>
@@ -194,12 +203,12 @@ export default function SessionDetail() {
         </div>
       </div>
 
-      <div className="mt-4 grid grid-cols-5 gap-4">
+      <div className="mt-4 grid grid-cols-1 md:grid-cols-5 gap-4">
         {/* Left: Micro panel (same width as Events) */}
-        <div className="col-span-4">
+        <div className="col-span-1 md:col-span-4">
           <Card>
             <CardHeader>
-              <CardTitle>Micro</CardTitle>
+              <CardTitle className="text-lg md:text-xl">Micro</CardTitle>
             </CardHeader>
             <CardContent>
               <AIVoice
@@ -222,14 +231,15 @@ export default function SessionDetail() {
           </Card>
         </div>
         {/* Right: Connection panel (same width as Logs) */}
-        <div className="col-span-1">
+        <div className="col-span-1 md:sticky md:top-4">
           <Card className="h-full">
             <CardHeader>
-              <CardTitle>Connexion</CardTitle>
+              <CardTitle className="text-lg md:text-xl">Connexion</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col gap-2">
                 <Button
+                  className="w-full"
                   onClick={async () => {
                     // Start mic hardware on Connect; streaming remains gated by mic button
                     setIsConnecting(true);
@@ -241,7 +251,6 @@ export default function SessionDetail() {
                       addLog(LogLevel.Error, 'Failed to connect', err);
                     }
                   }}
-                  className="w-full"
                   variant={(wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
                   disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting || isConnecting}
                 >
@@ -249,6 +258,7 @@ export default function SessionDetail() {
                   {(isConnecting || wsStatus === WsStatus.Connecting) ? 'Connexion…' : 'Connecter'}
                 </Button>
                 <Button
+                  className="w-full"
                   onClick={() => {
                     // Release mic hardware cleanly on Disconnect
                     setIsDisconnecting(true);
@@ -258,7 +268,6 @@ export default function SessionDetail() {
                     setIsMicOn(false);
                     setMode('idle');
                   }}
-                  className="w-full"
                   variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
                   disabled={wsStatus !== WsStatus.Connected || isDisconnecting}
                 >

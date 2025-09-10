@@ -9,7 +9,7 @@ import { LogLevel } from '@/lib/types';
 import { useApiClient } from '@/lib/hooks';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { getClientById, listSessionsForClient, setClientSessionDoc } from '@/lib/firebase';
+import { getClientById, listSessionsForClient, setClientSessionDoc, updateClientSessionDoc } from '@/lib/firebase';
 
 type ClientDoc = { id: string; name?: string; email?: string };
 
@@ -63,10 +63,31 @@ export default function SessionsPage() {
       }));
       setFirestoreSessions(minimal);
 
-      // Map id -> rapport prêt
-      const statusMap: Record<string, boolean> = {};
-      for (const s of minimal) statusMap[s.id] = !!s.is_report_done;
-      setReportReadyById(statusMap);
+      // Vérifier l'état réel côté backend (en parallèle) et mettre à jour Firestore si nécessaire
+      const checks = await Promise.all(
+        minimal.map(async (s) => {
+          try {
+            const details = await apiClient.getSession(s.id) as SessionDetails | null;
+            const ready = !!details?.state?.RapportDeSortie;
+            return { id: s.id, ready };
+          } catch {
+            return { id: s.id, ready: !!s.is_report_done };
+          }
+        })
+      );
+
+      const nextStatusMap: Record<string, boolean> = {};
+      for (const chk of checks) {
+        nextStatusMap[chk.id] = chk.ready;
+      }
+      setReportReadyById(nextStatusMap);
+
+      // Mettre à jour les docs Firestore si un rapport est devenu prêt
+      await Promise.all(
+        checks
+          .filter((chk) => chk.ready)
+          .map((chk) => updateClientSessionDoc(user.uid!, clientId, chk.id, { is_report_done: true }))
+      ).catch(() => { /* non bloquant */ });
 
       setApiResultTitle('Liste des sessions');
     } finally {
@@ -151,17 +172,17 @@ export default function SessionsPage() {
 
   return (
     <div className="max-w-6xl mx-auto p-4">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold">IAdvisor</h1>
-          <p className="text-muted-foreground">Gérez vos sessions pour: {clientDoc?.name || clientId}</p>
+      <div className="flex justify-between items-center gap-3 flex-col md:flex-row">
+        <div className="w-full">
+          <h1 className="text-xl md:text-2xl font-semibold">IAdvisor</h1>
+          <p className="text-sm md:text-base text-muted-foreground">Gérez vos sessions pour: {clientDoc?.name || clientId}</p>
         </div>
-        <div />
+        <div className="hidden md:block" />
       </div>
 
-      <div className="grid grid-cols-12 gap-4 mt-4">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 mt-4">
         {/* Colonne gauche: démarrer / lister */}
-        <div className="col-span-12 md:col-span-4 space-y-4">
+        <div className="col-span-1 md:col-span-4 space-y-4">
           <Card>
             <CardHeader>
               <CardTitle>Démarrer une visite</CardTitle>
@@ -216,12 +237,12 @@ export default function SessionsPage() {
         </div>
 
         {/* Colonne droite: aperçu rapport */}
-        <div className="col-span-12 md:col-span-8">
+        <div className="col-span-1 md:col-span-8">
           <Card>
             <CardHeader>
               <CardTitle>{apiResultTitle}</CardTitle>
             </CardHeader>
-            <CardContent>
+            <CardContent className="overflow-auto">
               {isLoadingSession && (
                 <div className="text-sm text-muted-foreground">Chargement de la session…</div>
               )}
