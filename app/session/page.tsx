@@ -60,6 +60,10 @@ function SessionsPageInner() {
     sessionId: ''
   }, addLog);
 
+  // Stabilize backend getter across renders to avoid effect loops
+  const getSessionRef = React.useRef<(id: string) => Promise<SessionDetails | null>>(async () => null);
+  React.useEffect(() => { getSessionRef.current = (apiClient.getSession as (id: string) => Promise<SessionDetails | null>); }, [apiClient]);
+
   // Charger le doc client + la liste des sessions Firestore
   const refreshSessions = useCallback(async () => {
     if (!user || !clientId) {
@@ -85,7 +89,7 @@ function SessionsPageInner() {
       const checks = await Promise.all(
         minimal.map(async (s) => {
           try {
-            const details = await apiClient.getSession(s.id) as SessionDetails | null;
+            const details = await getSessionRef.current(s.id) as SessionDetails | null;
             const ready = !!details?.state?.RapportDeSortie;
             return { id: s.id, ready };
           } catch {
@@ -111,7 +115,7 @@ function SessionsPageInner() {
     } finally {
       setIsListing(false);
     }
-  }, [user, clientId, apiClient]);
+  }, [user?.uid, clientId]);
 
   React.useEffect(() => { refreshSessions(); }, [refreshSessions]);
 

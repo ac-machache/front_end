@@ -71,17 +71,18 @@ export default function SessionDetail() {
       // Handle function call/response indicators
       const name: string = (msg?.name || '') as string;
       const lower = name.toLowerCase();
+      const isReportTool = lower.includes('resport') || lower.includes('report');
       if (msg.event === 'function_call') {
         setMode('thinking');
         // Pause upstream audio during tool calls (keep mic hardware on)
         try { setStreamingEnabled(false); } catch {}
-        if (lower.includes('report')) {
-          reportToolPendingRef.current = true;
-        }
+        // Do NOT set the pending flag yet; wait for the function_response to confirm the tool finished
       } else if (msg.event === 'function_response') {
-        // Clear indicator when a tool finishes and revert to baseline
-        // Resume upstream audio unless we are waiting for report tool turn_complete
-        if (!reportToolPendingRef.current) {
+        // If this was the report synthesizer, mark pending and wait for turn control before closing
+        if (isReportTool) {
+          reportToolPendingRef.current = true;
+        } else {
+          // Resume upstream if not waiting for report tool
           try { setStreamingEnabled(true); } catch {}
         }
         // If the model is (or was just) speaking, prefer speaking; otherwise idle
