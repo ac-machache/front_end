@@ -18,6 +18,9 @@ const eslintConfig = [
       "out/**",
       "build/**",
       "next-env.d.ts",
+      "**/*.test.ts",
+      "**/*.test.tsx",
+      "vitest.setup.ts",
     ],
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',

@@ -49,7 +49,7 @@ vi.mock('@/lib/hooks', async () => {
       wsCbs.onMessage = onMessage;
       wsCbs.onClose = onClose;
       wsCbs.onError = onError;
-      return { connect: connectMock, disconnect: disconnectMock, sendMessage: sendMessageMock, status: wsStatusRef.value as any };
+      return { connect: connectMock, disconnect: disconnectMock, sendMessage: sendMessageMock, status: wsStatusRef.value as 'Disconnected' | 'Connecting' | 'Connected' | 'Error' };
     },
     useAudioProcessor: (_onMicData: (b64: string, mime?: string) => void) => ({
       startMic: startMicMock,

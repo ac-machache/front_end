@@ -3,11 +3,7 @@ import { twMerge } from "tailwind-merge"
 import type { Config } from './types'
 
 // (legacy) env helper no longer used for backend URL; kept for future optional flags
-function env(name: string, fallback = ''): string {
-  if (typeof process !== 'undefined' && process.env && (process.env as Record<string, string | undefined>)[name]) return (process.env as Record<string, string | undefined>)[name] ?? fallback;
-  if (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV && (window as unknown as { __ENV?: Record<string, string> }).__ENV![name]) return (window as unknown as { __ENV?: Record<string, string> }).__ENV![name];
-  return fallback;
-}
+//
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -19,7 +15,8 @@ export function cn(...inputs: ClassValue[]) {
 //   return noProto.split('/')[0].trim();
 // }
 
-export function buildHttpUrl(_: Config): string {
+export function buildHttpUrl(config: Config): string {
+  void config; // avoid unused-arg lint
   const base =
     process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
     (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||

@@ -11,6 +11,8 @@ type IAdvisorProps = {
 };
 
 export default function IAdvisor({ active: _active, onToggle, rmsLevel01: _rms = 0, wsMode }: IAdvisorProps) {
+  void _active; // prevent unused var warning
+  void _rms; // prevent unused var warning
   const [mode, setMode] = useState<IAdvisorMode>("idle");
   const silenceTimeoutRef = React.useRef<number | null>(null);
 

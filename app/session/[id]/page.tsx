@@ -61,6 +61,8 @@ export default function SessionDetail() {
   const [mode, setMode] = useState<Mode>('idle');
   const speakTimerRef = useRef<number | null>(null);
   const reportToolPendingRef = useRef<boolean>(false);
+  const disconnectRef = useRef<() => void>(() => {});
+  const stopMicRef = useRef<() => void>(() => {});
 
   type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
   const onWsMessage = useCallback((data: unknown) => {
@@ -69,9 +71,7 @@ export default function SessionDetail() {
       // Handle function call/response indicators
       const name: string = (msg?.name || '') as string;
       const lower = name.toLowerCase();
-      const labelFor = (_toolLower: string) => undefined;
       if (msg.event === 'function_call') {
-        labelFor(lower);
         setMode('thinking');
         // Pause upstream audio during tool calls (keep mic hardware on)
         try { setStreamingEnabled(false); } catch {}
@@ -105,8 +105,8 @@ export default function SessionDetail() {
       // If report tool just finished, stop and go back to list with clientId
       if (reportToolPendingRef.current) {
         reportToolPendingRef.current = false;
-        try { disconnect(); } catch {}
-        try { stopMic(); } catch {}
+        try { disconnectRef.current(); } catch {}
+        try { stopMicRef.current(); } catch {}
         try { setStreamingEnabled(false); } catch {}
         setIsMicOn(false);
         setMode('idle');
@@ -136,7 +136,7 @@ export default function SessionDetail() {
     }
     // Do not log unhandled messages
     // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, clearPlaybackQueue, setStreamingEnabled, router, clientIdParam]);
+  }, [addLog, playAudioChunk, clearPlaybackQueue, setStreamingEnabled, router, clientIdParam, disconnectRef, stopMicRef]);
   const onWsClose = useCallback((code?: number, reason?: string) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
     // Always release microphone hardware and reset streaming gate on close
@@ -147,6 +147,10 @@ export default function SessionDetail() {
   }, [addLog, stopMic, setStreamingEnabled]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
+
+  // Keep imperative refs in sync with latest functions
+  React.useEffect(() => { stopMicRef.current = stopMic; }, [stopMic]);
+  React.useEffect(() => { disconnectRef.current = disconnect; }, [disconnect]);
 
   // Keep ref in sync once hook returns sendMessage
   React.useEffect(() => {

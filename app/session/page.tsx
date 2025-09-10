@@ -1,5 +1,5 @@
 "use client";
-import React, { useCallback } from 'react';
+import React, { useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -13,7 +13,7 @@ import { getClientById, listSessionsForClient, setClientSessionDoc, updateClient
 
 type ClientDoc = { id: string; name?: string; email?: string };
 
-export default function SessionsPage() {
+function SessionsPageInner() {
   const router = useRouter();
   // Wrap useSearchParams usage behind local state to satisfy build-time SSR bailouts
   const params = useSearchParams();
@@ -511,5 +511,13 @@ export default function SessionsPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SessionsPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-[calc(100vh-3.5rem)] items-center justify-center text-sm text-muted-foreground">Chargement…</div>}>
+      <SessionsPageInner />
+    </Suspense>
   );
 }

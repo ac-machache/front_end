@@ -33,9 +33,9 @@ vi.mock('@/lib/hooks', async () => {
   const actual = await vi.importActual<typeof import('@/lib/hooks')>('@/lib/hooks');
   return {
     ...actual,
-    useApiClient: (_cfg: unknown, _log: unknown) => ({
-      createSession: async (_init?: unknown) => ({ id: 's-new' }),
-      createSessionWithId: async (_id: string, _init?: unknown) => ({ id: 's-new' }),
+    useApiClient: () => ({
+      createSession: async () => ({ id: 's-new' }),
+      createSessionWithId: async () => ({ id: 's-new' }),
       listSessions: async () => [],
       getSession: async (id: string) => getSessionApiMock(id),
     }),
