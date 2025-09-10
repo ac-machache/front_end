@@ -104,3 +104,19 @@ export interface SessionState {
 
 export type SessionDetails = Session & { state?: SessionState };
 
+// Client and Firestore domain types
+export interface ClientRecord {
+  id: string;
+  name: string;
+  email: string;
+  notes?: string;
+  createdAt?: unknown;
+}
+
+export interface ClientSessionRecord {
+  id: string;
+  realtimeSessionId: string;
+  title?: string;
+  createdAt?: unknown;
+}
+

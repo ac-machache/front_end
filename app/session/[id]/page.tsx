@@ -162,7 +162,7 @@ export default function SessionDetail() {
           <h1 className="text-2xl font-semibold">Session {isHydrated ? (config.sessionId || (params?.id as string) || '') : ''}</h1>
           <p className="text-muted-foreground">Connexion et dictée audio en temps réel.</p>
         </div>
-        <Button variant="secondary" onClick={() => router.replace('/?page=list')}>Retour aux sessions</Button>
+        <Button variant="secondary" onClick={() => router.replace('/session')}>Retour aux sessions</Button>
       </div>
 
       <div className="flex-grow overflow-hidden">

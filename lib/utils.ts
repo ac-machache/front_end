@@ -2,6 +2,12 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 import type { Config } from './types'
 
+function env(name: string, fallback = ''): string {
+  if (typeof process !== 'undefined' && process.env && process.env[name]) return process.env[name] as string;
+  if (typeof window !== 'undefined' && (window as any).__ENV && (window as any).__ENV[name]) return (window as any).__ENV[name] as string;
+  return fallback;
+}
+
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
@@ -14,28 +20,24 @@ function sanitizeHost(host: string): string {
 }
 
 export function buildHttpUrl(config: Config): string {
-  // If host is localhost, use the Next.js proxy.
-  if (config.host === 'localhost') {
-    return '/api';
-  }
-  // Otherwise, build the full URL for cloud environments.
-  const protocol = config.scheme === 'wss' ? 'https' : 'http';
-  const host = sanitizeHost(config.host);
-  const port = (protocol === 'https' && config.port === '443') || (protocol === 'http' && config.port === '80') ? '' : `:${config.port}`;
-  return `${protocol}://${host}${port}`;
+  // Prefer env-configured base URL if present
+  const base = env('NEXT_PUBLIC_BACKEND_BASE_URL');
+  if (base) return base.replace(/\/$/, '');
+  // Fallback to proxy
+  return '/api';
 }
 
 export function buildWsUrl(config: Config): string {
-  // If host is localhost, use the Next.js proxy for WebSocket.
-  if (config.host === 'localhost') {
-    const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const host = typeof window !== 'undefined' ? window.location.host : ''; // This will be the ngrok host
-    return `${protocol}://${host}/api/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  const base = env('NEXT_PUBLIC_BACKEND_BASE_URL');
+  if (base) {
+    const proto = base.startsWith('https') ? 'wss' : 'ws';
+    const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
+    return `${proto}://${host}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
   }
-  // Otherwise, build the full URL for cloud environments.
-  const host = sanitizeHost(config.host);
-  const port = (config.scheme === 'wss' && config.port === '443') || (config.scheme === 'ws' && config.port === '80') ? '' : `:${config.port}`;
-  return `${config.scheme}://${host}${port}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  // Fallback to proxy
+  const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'wss' : 'ws';
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  return `${protocol}://${host}/api/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
 }
 
 // base64 helpers
