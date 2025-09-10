@@ -64,6 +64,13 @@ export default function SessionDetail() {
       setMode('idle');
     };
   }, [addLog, setStreamingEnabled]);
+  React.useEffect(() => {
+    try {
+      const a = new Audio('/lock.mp3');
+      a.preload = 'auto';
+      toolSoundRef.current = a;
+    } catch {}
+  }, []);
   // Transcription display disabled for now
   // const [toolLabel, setToolLabel] = useState<string>('');
   type Mode = 'idle' | 'speaking' | 'thinking';
@@ -78,6 +85,7 @@ export default function SessionDetail() {
   const shouldAutoReconnectRef = useRef<boolean>(true);
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef = useRef<number | null>(null);
+  const toolSoundRef = useRef<HTMLAudioElement | null>(null);
 
   type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
   const onWsMessage = useCallback((data: unknown) => {
@@ -91,6 +99,7 @@ export default function SessionDetail() {
         setMode('thinking');
         // Pause upstream audio during tool calls (keep mic hardware on)
         try { setStreamingEnabled(false); } catch {}
+        try { const a = toolSoundRef.current; if (a) { a.currentTime = 0; void a.play(); } } catch {}
         // Do NOT set the pending flag yet; wait for the function_response to confirm the tool finished
       } else if (msg.event === 'function_response') {
         // If this was the report synthesizer, mark pending and wait for turn control before closing
