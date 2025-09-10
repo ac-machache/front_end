@@ -46,7 +46,8 @@ export default function SessionDetail() {
   const wsUrl = useMemo(() => buildWsUrl(config), [config]);
   // No HTTP calls here; realtime over WebSocket only
 
-  const onWsOpen = useCallback(() => addLog(LogLevel.Ws, 'WebSocket connected.'), [addLog]);
+  // Define after useAudioProcessor to avoid TDZ; then assign in effect
+  const onWsOpenRef = useRef<() => void>(() => {});
 
   // Bridge sendMessage to audio hook without TDZ issues
   const sendMessageRef = useRef<(data: unknown) => void>(() => {});
@@ -55,6 +56,14 @@ export default function SessionDetail() {
   }, []);
   const [rms01, setRms01] = useState(0);
   const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog, (lvl) => setRms01(lvl));
+  React.useEffect(() => {
+    onWsOpenRef.current = () => {
+      addLog(LogLevel.Ws, 'WebSocket connected.');
+      try { setStreamingEnabled(true); } catch {}
+      setIsMicOn(true);
+      setMode('idle');
+    };
+  }, [addLog, setStreamingEnabled]);
   // Transcription display disabled for now
   // const [toolLabel, setToolLabel] = useState<string>('');
   type Mode = 'idle' | 'speaking' | 'thinking';
@@ -63,6 +72,12 @@ export default function SessionDetail() {
   const reportToolPendingRef = useRef<boolean>(false);
   const disconnectRef = useRef<() => void>(() => {});
   const stopMicRef = useRef<() => void>(() => {});
+  const connectRef = useRef<() => void>(() => {});
+  const startMicRef = useRef<() => Promise<void>>(async () => {});
+  const manualDisconnectRef = useRef<boolean>(false);
+  const shouldAutoReconnectRef = useRef<boolean>(true);
+  const reconnectAttemptsRef = useRef<number>(0);
+  const reconnectTimerRef = useRef<number | null>(null);
 
   type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
   const onWsMessage = useCallback((data: unknown) => {
@@ -106,6 +121,8 @@ export default function SessionDetail() {
       // If report tool just finished, stop and go back to list with clientId
       if (reportToolPendingRef.current) {
         reportToolPendingRef.current = false;
+        // Navigating away after report completion; do not auto-reconnect
+        shouldAutoReconnectRef.current = false;
         try { disconnectRef.current(); } catch {}
         try { stopMicRef.current(); } catch {}
         try { setStreamingEnabled(false); } catch {}
@@ -145,13 +162,33 @@ export default function SessionDetail() {
     setStreamingEnabled(false);
     setIsMicOn(false);
     setMode('idle');
+    // Auto-reconnect with backoff if not manual and allowed
+    try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
+    if (shouldAutoReconnectRef.current && !manualDisconnectRef.current) {
+      const attempt = reconnectAttemptsRef.current;
+      const delay = Math.min(5000, 1000 * Math.pow(2, attempt));
+      reconnectTimerRef.current = window.setTimeout(async () => {
+        try {
+          setIsConnecting(true);
+          await startMicRef.current();
+          connectRef.current();
+          reconnectAttemptsRef.current = 0;
+        } catch (err) {
+          reconnectAttemptsRef.current = attempt + 1;
+          addLog(LogLevel.Error, 'Auto-reconnect attempt failed', err);
+        }
+      }, delay);
+    }
   }, [addLog, stopMic, setStreamingEnabled]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
-  const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, onWsOpen, onWsMessage, onWsClose, onWsError);
+  const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, () => onWsOpenRef.current(), onWsMessage, onWsClose, onWsError);
 
   // Keep imperative refs in sync with latest functions
   React.useEffect(() => { stopMicRef.current = stopMic; }, [stopMic]);
   React.useEffect(() => { disconnectRef.current = disconnect; }, [disconnect]);
+  React.useEffect(() => { connectRef.current = connect; }, [connect]);
+  React.useEffect(() => { startMicRef.current = startMic; }, [startMic]);
+  React.useEffect(() => () => { try { if (reconnectTimerRef.current != null) window.clearTimeout(reconnectTimerRef.current); } catch {} }, []);
 
   // Keep ref in sync once hook returns sendMessage
   React.useEffect(() => {
@@ -238,6 +275,10 @@ export default function SessionDetail() {
                   onClick={async () => {
                     // Start mic hardware on Connect; streaming remains gated by mic button
                     setIsConnecting(true);
+                    manualDisconnectRef.current = false;
+                    shouldAutoReconnectRef.current = true;
+                    try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
+                    reconnectAttemptsRef.current = 0;
                     try {
                       await startMic();
                       connect();
@@ -257,6 +298,10 @@ export default function SessionDetail() {
                   onClick={() => {
                     // Release mic hardware cleanly on Disconnect
                     setIsDisconnecting(true);
+                    manualDisconnectRef.current = true;
+                    shouldAutoReconnectRef.current = false;
+                    try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
+                    reconnectAttemptsRef.current = 0;
                     disconnect();
                     stopMic();
                     setStreamingEnabled(false);
