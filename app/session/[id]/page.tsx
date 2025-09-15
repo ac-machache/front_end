@@ -85,6 +85,8 @@ export default function SessionDetail() {
       try { disconnectRef.current(); } catch {}
       try { stopMicRef.current(); } catch {}
       try { setStreamingEnabled(false); } catch {}
+      try { stopToolSoundLoop(); } catch {}
+      toolCallActiveRef.current = false;
       setIsMicOn(false);
       setMode('idle');
     };
@@ -110,6 +112,30 @@ export default function SessionDetail() {
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const toolSoundRef = useRef<HTMLAudioElement | null>(null);
+  const toolLoopingRef = useRef<boolean>(false);
+  const toolCallActiveRef = useRef<boolean>(false);
+
+  const startToolSoundLoop = useCallback(() => {
+    try {
+      const a = toolSoundRef.current;
+      if (!a) return;
+      a.loop = true;
+      a.currentTime = 0;
+      toolLoopingRef.current = true;
+      void a.play();
+    } catch {}
+  }, []);
+
+  const stopToolSoundLoop = useCallback(() => {
+    try {
+      const a = toolSoundRef.current;
+      if (!a) return;
+      a.loop = false;
+      a.pause();
+      a.currentTime = 0;
+      toolLoopingRef.current = false;
+    } catch {}
+  }, []);
 
   type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
   const onWsMessage = useCallback((data: unknown) => {
@@ -123,15 +149,21 @@ export default function SessionDetail() {
         setMode('thinking');
         // Pause upstream audio during tool calls (keep mic hardware on)
         try { setStreamingEnabled(false); } catch {}
-        try { const a = toolSoundRef.current; if (a) { a.currentTime = 0; void a.play(); } } catch {}
+        // Start looping tool sound until we receive model audio again
+        toolCallActiveRef.current = true;
+        startToolSoundLoop();
         // Do NOT set the pending flag yet; wait for the function_response to confirm the tool finished
       } else if (msg.event === 'function_response') {
         // If this was the report synthesizer, mark pending and wait for turn control before closing
         if (isReportTool) {
           reportToolPendingRef.current = true;
+          // Stop tool sound loop for report tool; we're navigating away shortly
+          toolCallActiveRef.current = false;
+          stopToolSoundLoop();
         } else {
           // Resume upstream if not waiting for report tool
           try { setStreamingEnabled(true); } catch {}
+          // Keep loop running for non-report tools until we actually get audio or turn control
         }
         // If the model is (or was just) speaking, prefer speaking; otherwise idle
         if (speakTimerRef.current) {
@@ -149,6 +181,11 @@ export default function SessionDetail() {
       addLog(LogLevel.Event, 'Turn Control', msg);
       if (msg?.interrupted) {
         clearPlaybackQueue();
+      }
+      // End any tool sound loop if still active
+      if (toolCallActiveRef.current || toolLoopingRef.current) {
+        toolCallActiveRef.current = false;
+        stopToolSoundLoop();
       }
       // clear any previous tool indicator
       // If report tool just finished, stop and go back to list with clientId
@@ -178,6 +215,11 @@ export default function SessionDetail() {
     }
     if (msg?.mime_type && msg?.data) {
       if (msg.mime_type.startsWith('audio/')) {
+        // Stop tool sound loop when model audio arrives
+        if (toolCallActiveRef.current || toolLoopingRef.current) {
+          toolCallActiveRef.current = false;
+          stopToolSoundLoop();
+        }
         playAudioChunk(msg.data as string);
         setMode('speaking');
         if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
@@ -192,6 +234,9 @@ export default function SessionDetail() {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason });
     // Always release microphone hardware and reset streaming gate on close
     stopMic();
+    // Ensure any tool sound loop is stopped on close
+    toolCallActiveRef.current = false;
+    stopToolSoundLoop();
     setStreamingEnabled(false);
     setIsMicOn(false);
     setMode('idle');
