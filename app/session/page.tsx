@@ -115,7 +115,7 @@ function SessionsPageInner() {
     } finally {
       setIsListing(false);
     }
-  }, [user?.uid, clientId]);
+  }, [user, clientId]);
 
   React.useEffect(() => { refreshSessions(); }, [refreshSessions]);
 
@@ -126,7 +126,7 @@ function SessionsPageInner() {
   // Démarrer une nouvelle visite:
   // 1) créer la session côté backend avec userId = clientId
   // 2) stocker la session dans Firestore: users/{uid}/clients/{clientId}/sessions/{sessionId}
-  const startVisit = async () => {
+  const startVisit = React.useCallback(async () => {
     if (!user || !clientId) return;
     setIsCreating(true);
     try {
@@ -150,10 +150,10 @@ function SessionsPageInner() {
     } finally {
       setIsCreating(false);
     }
-  };
+  }, [user, clientId, clientDoc?.name, apiClient, addLog, router, refreshSessions]);
 
   // Afficher un rapport depuis le backend (getSession)
-  const showSessionDetails = async (sessionId: string) => {
+  const showSessionDetails = React.useCallback(async (sessionId: string) => {
     setSelectedSession(null);
     setIsLoadingSession(true);
     try {
@@ -163,7 +163,7 @@ function SessionsPageInner() {
     } finally {
       setIsLoadingSession(false);
     }
-  };
+  }, [apiClient]);
 
   // États de garde UI
   if (loading || !user) {

@@ -60,11 +60,16 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
     ingestSessionMemory: async (returnContext: boolean = false) => {
       const path = `/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`;
       const url = `${baseUrl}${path}`;
-      addLog(LogLevelEnum.Http, `POST ${url} (keepalive)`, undefined);
+      addLog(LogLevelEnum.Http, `POST ${url} (keepalive/beacon)`, undefined);
       try {
+        // Prefer sendBeacon when available for background delivery on navigation
+        if (typeof navigator !== 'undefined' && (navigator as unknown as { sendBeacon?: (url: string, data?: BodyInit | null) => boolean }).sendBeacon) {
+          const ok = (navigator as unknown as { sendBeacon: (url: string, data?: BodyInit | null) => boolean }).sendBeacon(url);
+          if (ok) { addLog(LogLevelEnum.Http, 'sendBeacon queued', { url }); return { status: 'queued' } as unknown; }
+        }
         const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true });
         const text = await response.text();
-        const data = text ? JSON.parse(text) : null;
+        const data: unknown = text ? JSON.parse(text) : null;
         if (!response.ok) {
           const err = new Error(`HTTP ${response.status}`) as Error & { cause?: unknown };
           err.cause = data;
