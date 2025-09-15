@@ -8,7 +8,7 @@ import { Loader2 } from 'lucide-react';
 import IAdvisor, { type IAdvisorMode } from '@/components/kokonutui/IAdvisor';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
-import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
+import { useLocalStorage, useWebSocket, useAudioProcessor, useApiClient } from '@/lib/hooks';
 import { buildWsUrl } from '@/lib/utils';
 import { useSearchParams } from 'next/navigation';
 
@@ -62,11 +62,12 @@ export default function SessionDetail() {
       try { setStreamingEnabled(true); } catch {}
       setIsMicOn(true);
       setMode('idle');
+      hasIngestedRef.current = false;
     };
   }, [addLog, setStreamingEnabled]);
   React.useEffect(() => {
     try {
-      const a = new Audio('/switches_purple.mp3');
+      const a = new Audio('/gradient.mp3');
       a.preload = 'auto';
       toolSoundRef.current = a;
     } catch {}
@@ -114,6 +115,7 @@ export default function SessionDetail() {
   const toolSoundRef = useRef<HTMLAudioElement | null>(null);
   const toolLoopingRef = useRef<boolean>(false);
   const toolCallActiveRef = useRef<boolean>(false);
+  const hasIngestedRef = useRef<boolean>(false);
 
   const startToolSoundLoop = useCallback(() => {
     try {
@@ -144,7 +146,8 @@ export default function SessionDetail() {
       // Handle function call/response indicators
       const name: string = (msg?.name || '') as string;
       const lower = name.toLowerCase();
-      const isReportTool = lower.includes('resport') || lower.includes('report');
+      // New report tool identifier
+      const isReportTool = lower.includes('reportsynthesizer');
       if (msg.event === 'function_call') {
         setMode('thinking');
         // Pause upstream audio during tool calls (keep mic hardware on)
@@ -154,7 +157,7 @@ export default function SessionDetail() {
         startToolSoundLoop();
         // Do NOT set the pending flag yet; wait for the function_response to confirm the tool finished
       } else if (msg.event === 'function_response') {
-        // If this was the report synthesizer, mark pending and wait for turn control before closing
+        // If this was the ReportSynthesizer, mark pending and wait for turn control before closing
         if (isReportTool) {
           reportToolPendingRef.current = true;
           // Stop tool sound loop for report tool; we're navigating away shortly
@@ -188,7 +191,7 @@ export default function SessionDetail() {
         stopToolSoundLoop();
       }
       // clear any previous tool indicator
-      // If report tool just finished, stop and go back to list with clientId
+      // If report tool just finished, ingest memory and go back to list with clientId
       if (reportToolPendingRef.current) {
         reportToolPendingRef.current = false;
         // Navigating away after report completion; do not auto-reconnect
@@ -198,6 +201,11 @@ export default function SessionDetail() {
         try { setStreamingEnabled(false); } catch {}
         setIsMicOn(false);
         setMode('idle');
+        // Fire-and-forget ingest; use keepalive in client to survive navigation
+        if (!hasIngestedRef.current) {
+          hasIngestedRef.current = true;
+          try { void api.ingestSessionMemory(false); } catch {}
+        }
         router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session');
         return;
       }
@@ -260,6 +268,7 @@ export default function SessionDetail() {
   }, [addLog, stopMic, setStreamingEnabled]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, () => onWsOpenRef.current(), onWsMessage, onWsClose, onWsError);
+  const api = useApiClient(config, addLog);
 
   // Keep imperative refs in sync with latest functions
   React.useEffect(() => { stopMicRef.current = stopMic; }, [stopMic]);

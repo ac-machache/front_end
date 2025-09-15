@@ -57,6 +57,28 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
     createSessionWithId: (sessionId: string, initialState?: Record<string, unknown>) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`, initialState),
     listSessions: () => performRequest('GET', `/apps/${config.appName}/users/${config.userId}/sessions`),
     getSession: (sessionId: string) => performRequest('GET', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`),
+    ingestSessionMemory: async (returnContext: boolean = false) => {
+      const path = `/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`;
+      const url = `${baseUrl}${path}`;
+      addLog(LogLevelEnum.Http, `POST ${url} (keepalive)`, undefined);
+      try {
+        const response = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, keepalive: true });
+        const text = await response.text();
+        const data = text ? JSON.parse(text) : null;
+        if (!response.ok) {
+          const err = new Error(`HTTP ${response.status}`) as Error & { cause?: unknown };
+          err.cause = data;
+          throw err;
+        }
+        addLog(LogLevelEnum.Http, `Success: ${response.status}`, data);
+        return data;
+      } catch (error: unknown) {
+        const message = error instanceof Error ? error.message : String(error);
+        const cause = (error as { cause?: unknown })?.cause ?? error;
+        addLog(LogLevelEnum.Error, message, cause);
+        return null;
+      }
+    },
   };
 }
 
