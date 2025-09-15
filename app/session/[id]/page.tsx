@@ -5,7 +5,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 // removed Loader2-based status row in events panel
-import IAdvisor from '@/components/kokonutui/IAdvisor';
+import IAdvisor, { type IAdvisorMode } from '@/components/kokonutui/IAdvisor';
 import type { Config, LogEntry } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
@@ -23,6 +23,7 @@ export default function SessionDetail() {
   // const [isHydrated, setIsHydrated] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isDisconnecting, setIsDisconnecting] = useState(false);
+  const [isOnline, setIsOnline] = useState<boolean>(typeof navigator !== 'undefined' ? navigator.onLine : true);
   const logCounter = useRef(0);
 
   // Ensure sessionId matches URL
@@ -54,8 +55,7 @@ export default function SessionDetail() {
   const onMicData = useCallback((base64: string) => {
     sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
   }, []);
-  const [rms01, setRms01] = useState(0);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog, (lvl) => setRms01(lvl));
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
   React.useEffect(() => {
     onWsOpenRef.current = () => {
       addLog(LogLevel.Ws, 'WebSocket connected.');
@@ -66,11 +66,35 @@ export default function SessionDetail() {
   }, [addLog, setStreamingEnabled]);
   React.useEffect(() => {
     try {
-      const a = new Audio('/lock.mp3');
+      const a = new Audio('/switches_purple.mp3');
       a.preload = 'auto';
       toolSoundRef.current = a;
     } catch {}
   }, []);
+  React.useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      addLog(LogLevel.Ws, 'Browser online');
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      addLog(LogLevel.Ws, 'Browser offline');
+      try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
+      shouldAutoReconnectRef.current = false;
+      manualDisconnectRef.current = true;
+      try { disconnectRef.current(); } catch {}
+      try { stopMicRef.current(); } catch {}
+      try { setStreamingEnabled(false); } catch {}
+      setIsMicOn(false);
+      setMode('idle');
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [addLog, setStreamingEnabled]);
   // Transcription display disabled for now
   // const [toolLabel, setToolLabel] = useState<string>('');
   type Mode = 'idle' | 'speaking' | 'thinking';
@@ -219,11 +243,24 @@ export default function SessionDetail() {
 
   // UI status pill meta for header
   const statusMeta = React.useMemo(() => {
+    if (!isOnline) return { text: 'Hors ligne', classes: 'bg-red-100 text-red-700 border border-red-200' };
     if (wsStatus === WsStatus.Connected) return { text: 'Connecté', classes: 'bg-emerald-100 text-emerald-700 border border-emerald-200' };
     if (wsStatus === WsStatus.Connecting || isConnecting) return { text: 'Connexion…', classes: 'bg-amber-100 text-amber-700 border border-amber-200' };
     if (wsStatus === WsStatus.Error) return { text: 'Erreur', classes: 'bg-red-100 text-red-700 border border-red-200' };
     return { text: 'Déconnecté', classes: 'bg-gray-100 text-gray-700 border border-gray-200' };
-  }, [wsStatus, isConnecting]);
+  }, [wsStatus, isConnecting, isOnline]);
+
+  const advisorMode: IAdvisorMode = React.useMemo(() => {
+    if (!isOnline) return 'disconnected';
+    if (wsStatus === WsStatus.Connecting || isConnecting) return 'connecting';
+    if (wsStatus === WsStatus.Error || wsStatus === WsStatus.Disconnected) return 'disconnected';
+    // Connected
+    if (mode === 'thinking') return 'thinking';
+    if (mode === 'speaking') return 'responding';
+    return 'idle';
+  }, [isOnline, wsStatus, isConnecting, mode]);
+
+  const advisorDisabled = !isOnline || wsStatus !== WsStatus.Connected;
 
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
@@ -246,10 +283,20 @@ export default function SessionDetail() {
                 <CardTitle>Événements</CardTitle>
               </CardHeader>
               <CardContent className="overflow-hidden h-[calc(100%-3rem)] flex flex-col gap-4">
+                {!isOnline && (
+                  <div className="w-full text-sm px-3 py-2 rounded-md bg-red-50 text-red-700 border border-red-200">
+                    Hors ligne : vérifiez votre connexion internet.
+                  </div>
+                )}
+                {isOnline && wsStatus !== WsStatus.Connected && (
+                  <div className="w-full text-sm px-3 py-2 rounded-md bg-amber-50 text-amber-700 border border-amber-200">
+                    {wsStatus === WsStatus.Connecting || isConnecting ? 'Connexion en cours…' : 'Non connecté au serveur.'}
+                  </div>
+                )}
                 <div className="flex-1 overflow-auto bg-background border rounded-md p-4 flex items-center justify-center">
                   <IAdvisor
                     active={isMicOn}
-                    onToggle={() => {
+                    onToggle={advisorDisabled ? undefined : () => {
                       if (!isMicOn) {
                         setStreamingEnabled(true);
                         setIsMicOn(true);
@@ -260,8 +307,8 @@ export default function SessionDetail() {
                         setMode('idle');
                       }
                     }}
-                    rmsLevel01={rms01}
-                    wsMode={mode === 'thinking' ? 'thinking' : (mode === 'speaking' ? 'responding' : 'idle')}
+                    wsMode={advisorMode}
+                    disabled={advisorDisabled}
                   />
                 </div>
               </CardContent>
@@ -296,8 +343,8 @@ export default function SessionDetail() {
                       addLog(LogLevel.Error, 'Failed to connect', err);
                     }
                   }}
-                  variant={(wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
-                  disabled={wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting || isConnecting}
+                  variant={(!isOnline || wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting) ? 'secondary' : 'default'}
+                  disabled={!isOnline || wsStatus === WsStatus.Connected || wsStatus === WsStatus.Connecting || isConnecting}
                 >
                   {(isConnecting || wsStatus === WsStatus.Connecting) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {(isConnecting || wsStatus === WsStatus.Connecting) ? 'Connexion…' : 'Connecter'}
@@ -318,7 +365,7 @@ export default function SessionDetail() {
                     setMode('idle');
                   }}
                   variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
-                  disabled={wsStatus !== WsStatus.Connected || isDisconnecting}
+                  disabled={!isOnline || wsStatus !== WsStatus.Connected || isDisconnecting}
                 >
                   {isDisconnecting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   {isDisconnecting ? 'Déconnexion…' : 'Déconnecter'}
