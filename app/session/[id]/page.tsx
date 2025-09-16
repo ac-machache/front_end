@@ -96,7 +96,7 @@ export default function SessionDetail() {
   }, [addLog, setStreamingEnabled, isOnline]);
   React.useEffect(() => {
     try {
-      const a = new Audio('/gradient.mp3');
+      const a = new Audio('/l_theme.mp3');
       a.preload = 'auto';
       toolSoundRef.current = a;
     } catch {}
