@@ -50,6 +50,20 @@ const { connect, disconnect, sendMessage, status, isFirstConnection } = useWebSo
 
 ### 3. **New Event Types**
 ```typescript
+// Connection health events
+interface HeartbeatEvent {
+  event: 'heartbeat';
+  timestamp: number;
+  data: string;
+}
+
+interface HeartbeatResponseEvent {
+  event: 'heartbeat_response';
+  timestamp: number;
+  server_timestamp: number;
+}
+
+// Session resumption events
 interface SessionResumedEvent {
   event: 'session_resumed';
   state: {

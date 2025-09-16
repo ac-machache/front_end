@@ -140,6 +140,19 @@ export interface AudioResumeEvent {
   };
 }
 
+// Heartbeat event types
+export interface HeartbeatEvent {
+  event: 'heartbeat';
+  timestamp: number;
+  data: string;
+}
+
+export interface HeartbeatResponseEvent {
+  event: 'heartbeat_response';
+  timestamp: number;
+  server_timestamp: number;
+}
+
 // Connection state for UI feedback
 export interface ConnectionState {
   isResuming: boolean;

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 // removed Loader2-based status row in events panel
 import IAdvisor, { type IAdvisorMode } from '@/components/kokonutui/IAdvisor';
-import type { Config, LogEntry, SessionResumedEvent, AudioResumeEvent, ConnectionState } from '@/lib/types';
+import type { Config, LogEntry, SessionResumedEvent, AudioResumeEvent, ConnectionState, HeartbeatEvent } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import { useLocalStorage, useWebSocket, useAudioProcessor, useApiClient } from '@/lib/hooks';
 import { buildWsUrl } from '@/lib/utils';
@@ -67,12 +67,34 @@ export default function SessionDetail() {
   // Bridge sendMessage to audio hook without TDZ issues
   const sendMessageRef = useRef<(data: unknown) => void>(() => {});
   const onMicData = useCallback((base64: string) => {
+    // Always log when this function is called to debug if mic is capturing
+    addLog(LogLevel.Audio, 'onMicData called', { 
+      base64Length: base64.length,
+      hasData: base64.length > 0,
+      isOnline,
+      serverReady: serverReadyRef.current,
+      micOn: isMicOnRef.current,
+      toolActive: toolCallActiveRef.current,
+      wsStatus: wsStatusRef.current
+    });
+    
     // Strict gating: drop frames unless online, server-ready, mic on, not in tool call, and connected
     const canSend = isOnline && serverReadyRef.current && isMicOnRef.current && !toolCallActiveRef.current && wsStatusRef.current === WsStatus.Connected;
-    if (canSend) {
+    
+    // Debug logging for audio flow
+    if (!canSend) {
+      const reasons = [];
+      if (!isOnline) reasons.push('offline');
+      if (!serverReadyRef.current) reasons.push('server-not-ready');
+      if (!isMicOnRef.current) reasons.push('mic-off');
+      if (toolCallActiveRef.current) reasons.push('tool-active');
+      if (wsStatusRef.current !== WsStatus.Connected) reasons.push(`ws-status-${wsStatusRef.current}`);
+      addLog(LogLevel.Audio, `Audio blocked: ${reasons.join(', ')}`, { base64Length: base64.length });
+    } else {
+      addLog(LogLevel.Audio, 'Sending audio data', { base64Length: base64.length });
       sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
     }
-  }, [isOnline]);
+  }, [isOnline, addLog]);
   const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
   React.useEffect(() => {
     onWsOpenRef.current = () => {
@@ -88,7 +110,7 @@ export default function SessionDetail() {
   }, [addLog]);
   React.useEffect(() => {
     try {
-      const a = new Audio('/l_theme.mp3');
+      const a = new Audio('/tool_call.mp3');
       a.preload = 'auto';
       toolSoundRef.current = a;
     } catch {}
@@ -106,7 +128,10 @@ export default function SessionDetail() {
       manualDisconnectRef.current = true;
       try { disconnectRef.current(); } catch {}
       try { stopMicRef.current(); } catch {}
-      try { setStreamingEnabled(false); } catch {}
+      try { 
+        addLog(LogLevel.Audio, 'Disabling streaming: offline handler');
+        setStreamingEnabled(false); 
+      } catch {}
       // Inline stop of tool loop to avoid dependency issues
       try { const a = toolSoundRef.current; if (a) { a.loop = false; a.pause(); a.currentTime = 0; } } catch {}
       toolCallActiveRef.current = false;
@@ -179,7 +204,13 @@ export default function SessionDetail() {
       const isReportTool = lower.includes('reportsynthesizer');
       // Server handshake ready event
       if (msg.event === 'ready') {
-        try { addLog(LogLevel.Event, 'Server ready'); } catch {}
+        try { 
+          addLog(LogLevel.Event, 'Server ready - audio can now be sent', {
+            micOn: isMicOnRef.current,
+            toolCallActive: toolCallActiveRef.current,
+            wsStatus: wsStatusRef.current
+          }); 
+        } catch {}
         serverReadyRef.current = true;
         setServerReady(true);
         return;
@@ -220,11 +251,33 @@ export default function SessionDetail() {
         } catch {}
         return;
       }
+      
+      // Handle heartbeat from server
+      if (msg.event === 'heartbeat') {
+        const heartbeatEvent = msg as HeartbeatEvent;
+        try {
+          // Respond to server heartbeat
+          sendMessageRef.current({
+            "event": "heartbeat_response",
+            "timestamp": Date.now(),
+            "server_timestamp": heartbeatEvent.timestamp
+          });
+          addLog(LogLevel.Event, 'Heartbeat received and responded', { 
+            server_timestamp: heartbeatEvent.timestamp,
+            data: heartbeatEvent.data 
+          });
+        } catch {}
+        return;
+      }
+      
       if (msg.event === 'function_call') {
         turnIdRef.current += 1;
         setMode('thinking');
         // Pause upstream audio during tool calls (keep mic hardware on)
-        try { setStreamingEnabled(false); } catch {}
+        try { 
+        addLog(LogLevel.Audio, 'Disabling streaming: offline handler');
+        setStreamingEnabled(false); 
+      } catch {}
         // Start looping tool sound until we receive model audio again
         toolCallActiveRef.current = true;
         startToolSoundLoop();
@@ -282,7 +335,10 @@ export default function SessionDetail() {
         shouldAutoReconnectRef.current = false;
         try { disconnectRef.current(); } catch {}
         try { stopMicRef.current(); } catch {}
-        try { setStreamingEnabled(false); } catch {}
+        try { 
+        addLog(LogLevel.Audio, 'Disabling streaming: offline handler');
+        setStreamingEnabled(false); 
+      } catch {}
         setIsMicOn(false);
         setMode('idle');
         // Fire-and-forget ingest; use keepalive in client to survive navigation
@@ -332,6 +388,7 @@ export default function SessionDetail() {
     toolCallActiveRef.current = false;
     stopToolSoundLoop();
     clearThinkingTimeout();
+    addLog(LogLevel.Audio, 'Disabling streaming: WebSocket close handler');
     setStreamingEnabled(false);
     setServerReady(false);
     setMode('idle');
@@ -380,6 +437,13 @@ export default function SessionDetail() {
   React.useEffect(() => { connectRef.current = connect; }, [connect]);
   React.useEffect(() => { startMicRef.current = startMic; }, [startMic]);
   React.useEffect(() => () => { try { if (reconnectTimerRef.current != null) window.clearTimeout(reconnectTimerRef.current); } catch {} }, []);
+
+  // Keep streamingEnabled in sync with connection + readiness + mic state
+  React.useEffect(() => {
+    const shouldEnable = isOnline && wsStatus === WsStatus.Connected && serverReady && isMicOn && mode !== 'thinking';
+    setStreamingEnabled(shouldEnable);
+    try { addLog(LogLevel.Audio, `Streaming ${shouldEnable ? 'enabled' : 'disabled'} (sync)`); } catch {}
+  }, [isOnline, wsStatus, serverReady, isMicOn, mode, setStreamingEnabled, addLog]);
 
   // Keep refs in sync once hooks return functions
   React.useEffect(() => {
@@ -475,15 +539,27 @@ export default function SessionDetail() {
                 <div className="flex-1 overflow-auto bg-background border rounded-md p-4 flex items-center justify-center">
                   <IAdvisor
                     active={isMicOn}
-                    onToggle={advisorDisabled ? undefined : () => {
+                    onToggle={advisorDisabled ? undefined : async () => {
                       if (!isMicOn) {
+                        addLog(LogLevel.Audio, 'User enabled microphone - attempting to start mic hardware');
+                        addLog(LogLevel.Audio, 'Setting streaming enabled = true');
                         setStreamingEnabled(true);
                         setIsMicOn(true);
                         setMode('idle');
+                        // Manually start mic to debug
+                        try {
+                          await startMic();
+                          addLog(LogLevel.Audio, 'Microphone hardware started successfully');
+                        } catch (err) {
+                          addLog(LogLevel.Error, 'Failed to start microphone hardware', err);
+                        }
                       } else {
+                        addLog(LogLevel.Audio, 'User disabled microphone');
+                        addLog(LogLevel.Audio, 'Disabling streaming: user disabled microphone');
                         setStreamingEnabled(false);
                         setIsMicOn(false);
                         setMode('idle');
+                        stopMic();
                       }
                     }}
                     wsMode={advisorMode}
@@ -539,6 +615,7 @@ export default function SessionDetail() {
                     reconnectAttemptsRef.current = 0;
                     disconnect();
                     stopMic();
+                    addLog(LogLevel.Audio, 'Disabling streaming: disconnect button clicked');
                     setStreamingEnabled(false);
                     setMode('idle');
                   }}

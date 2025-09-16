@@ -202,7 +202,10 @@ export function useAudioProcessor(
   // Gate to allow pausing the upstream without releasing the mic device
   // Default OFF so UI mic button explicitly enables sending
   const streamingEnabledRef = useRef<boolean>(false);
-  const setStreamingEnabled = (enabled: boolean) => { streamingEnabledRef.current = enabled; };
+  const setStreamingEnabled = useCallback((enabled: boolean) => { 
+    streamingEnabledRef.current = enabled;
+    addLog(LogLevelEnum.Audio, `Streaming ${enabled ? 'enabled' : 'disabled'}`, { enabled });
+  }, [addLog]);
 
   const startMic = useCallback(async () => {
     try {
@@ -244,13 +247,32 @@ export function useAudioProcessor(
       }
 
       if (micFlushTimer.current == null) {
+        addLog(LogLevelEnum.Audio, 'Starting microphone flush timer');
         micFlushTimer.current = window.setInterval(() => {
-          if (micChunkQueue.current.length === 0) return;
+          const queueLength = micChunkQueue.current.length;
+          addLog(LogLevelEnum.Audio, 'Timer tick', { 
+            queueLength, 
+            streamingEnabled: streamingEnabledRef.current,
+            timerRunning: true
+          });
+          
+          if (queueLength === 0) {
+            return;
+          }
+          
           let total = 0; for (const c of micChunkQueue.current) total += c.length;
           const combined = new Uint8Array(total); let off = 0; for (const c of micChunkQueue.current) { combined.set(c, off); off += c.length; }
+          addLog(LogLevelEnum.Audio, 'Processing audio chunks', { 
+            chunkCount: queueLength, 
+            totalBytes: total,
+            streamingEnabled: streamingEnabledRef.current 
+          });
           micChunkQueue.current = [];
+          
           if (streamingEnabledRef.current) {
             onMicData(arrayBufferToBase64(combined.buffer), 'audio/pcm');
+          } else {
+            addLog(LogLevelEnum.Audio, 'Audio data captured but streaming disabled');
           }
         }, MIC_FLUSH_MS);
       }
