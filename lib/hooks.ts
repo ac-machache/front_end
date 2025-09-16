@@ -87,18 +87,20 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
   };
 }
 
-// WebSocket
+// Enhanced WebSocket with disconnect reason tracking
 export function useWebSocket(
   url: string,
   onOpen: () => void,
   onMessage: (data: unknown) => void,
-  onClose: (code: number, reason: string) => void,
+  onClose: (code: number, reason: string, wasManual: boolean) => void,
   onError: (event: Event) => void,
 ) {
   const ws = useRef<WebSocket | null>(null);
   const isManuallyClosingRef = useRef(false);
+  const connectionAttemptRef = useRef(0);
   const [status, setStatus] = useState<WsStatus>(WsStatusEnum.Disconnected);
-  const connect = useCallback(() => {
+  
+  const connect = useCallback((resumeConnection = false) => {
     if (ws.current) {
       const state = ws.current.readyState;
       if (state === WebSocket.OPEN || state === WebSocket.CONNECTING || state === WebSocket.CLOSING) {
@@ -107,9 +109,20 @@ export function useWebSocket(
     }
     setStatus(WsStatusEnum.Connecting);
     isManuallyClosingRef.current = false;
-    const socket = new WebSocket(url);
+    connectionAttemptRef.current += 1;
+    
+    // Build URL with resume parameter if this is a reconnection attempt
+    const wsUrl = resumeConnection ? `${url}&resume=true` : url;
+    const socket = new WebSocket(wsUrl);
     socket.binaryType = 'arraybuffer';
-    socket.onopen = () => { ws.current = socket; setStatus(WsStatusEnum.Connected); onOpen(); };
+    
+    socket.onopen = () => { 
+      ws.current = socket; 
+      setStatus(WsStatusEnum.Connected); 
+      connectionAttemptRef.current = 0; // Reset on successful connection
+      onOpen(); 
+    };
+    
     socket.onmessage = async (event) => {
       try {
         if (typeof event.data === 'string') {
@@ -122,17 +135,27 @@ export function useWebSocket(
         }
       } catch {}
     };
+    
     socket.onclose = (event) => {
       setStatus(WsStatusEnum.Disconnected);
-      onClose(event.code, event.reason);
+      const wasManual = isManuallyClosingRef.current;
+      onClose(event.code, event.reason, wasManual);
       if (ws.current === socket) {
         ws.current = null;
       }
       isManuallyClosingRef.current = false;
     };
+    
     socket.onerror = (event) => { setStatus(WsStatusEnum.Error); onError(event); };
     ws.current = socket;
   }, [url, onOpen, onMessage, onClose, onError]);
+  
+  // Enhanced connect for resumption
+  const connectWithResume = useCallback(() => {
+    const shouldResume = connectionAttemptRef.current > 0; // Resume if this isn't the first connection
+    connect(shouldResume);
+  }, [connect]);
+  
   const disconnect = useCallback(() => {
     if (!ws.current) { setStatus(WsStatusEnum.Disconnected); return; }
     const state = ws.current.readyState;
@@ -147,8 +170,19 @@ export function useWebSocket(
       ws.current.close(1000, 'User disconnected');
     }
   }, []);
-  const sendMessage = useCallback((data: unknown) => { if (ws.current && ws.current.readyState === WebSocket.OPEN) ws.current.send(JSON.stringify(data)); }, []);
-  return { connect, disconnect, sendMessage, status };
+  
+  const sendMessage = useCallback((data: unknown) => { 
+    if (ws.current && ws.current.readyState === WebSocket.OPEN) 
+      ws.current.send(JSON.stringify(data)); 
+  }, []);
+  
+  return { 
+    connect: connectWithResume, 
+    disconnect, 
+    sendMessage, 
+    status,
+    isFirstConnection: connectionAttemptRef.current === 0
+  };
 }
 
 // Audio processing

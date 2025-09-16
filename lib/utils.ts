@@ -27,7 +27,7 @@ export function buildHttpUrl(config: Config): string {
   return base.replace(/\/$/, '');
 }
 
-export function buildWsUrl(config: Config): string {
+export function buildWsUrl(config: Config, options?: { resume?: boolean }): string {
   const base =
     process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
     (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
@@ -37,7 +37,14 @@ export function buildWsUrl(config: Config): string {
   }
   const proto = base.startsWith('https') ? 'wss' : 'ws';
   const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  return `${proto}://${host}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?is_audio=true`;
+  
+  const params = new URLSearchParams();
+  params.set('is_audio', 'true');
+  if (options?.resume) {
+    params.set('resume', 'true');
+  }
+  
+  return `${proto}://${host}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?${params.toString()}`;
 }
 
 // base64 helpers
