@@ -110,7 +110,7 @@ export default function SessionDetail() {
   }, [addLog]);
   React.useEffect(() => {
     try {
-      const a = new Audio('/tool_call.mp3');
+      const a = new Audio('/Thinking.mp3');
       a.preload = 'auto';
       toolSoundRef.current = a;
     } catch {}
