@@ -113,6 +113,9 @@ export default function SessionDetail() {
       const a = new Audio('/Thinking.mp3');
       a.preload = 'auto';
       toolSoundRef.current = a;
+      const c = new Audio('/Connected.mp3');
+      c.preload = 'auto';
+      connectedSoundRef.current = c;
     } catch {}
   }, []);
   React.useEffect(() => {
@@ -159,6 +162,7 @@ export default function SessionDetail() {
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef = useRef<number | null>(null);
   const toolSoundRef = useRef<HTMLAudioElement | null>(null);
+  const connectedSoundRef = useRef<HTMLAudioElement | null>(null);
   const toolLoopingRef = useRef<boolean>(false);
   const toolCallActiveRef = useRef<boolean>(false);
   const hasIngestedRef = useRef<boolean>(false);
@@ -210,6 +214,11 @@ export default function SessionDetail() {
             toolCallActive: toolCallActiveRef.current,
             wsStatus: wsStatusRef.current
           }); 
+          // Play a short cue to inform the user the model is ready
+          try {
+            const s = connectedSoundRef.current;
+            if (s) { s.currentTime = 0; void s.play()?.catch(() => {}); }
+          } catch {}
         } catch {}
         serverReadyRef.current = true;
         setServerReady(true);
