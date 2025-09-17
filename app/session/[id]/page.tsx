@@ -249,14 +249,33 @@ export default function SessionDetail() {
         return;
       }
       
+      // Back-compat: previous audio_resume is no longer sent by backend.
       if (msg.event === 'audio_resume') {
-        const audioEvent = msg as AudioResumeEvent;
-        try { 
-          addLog(LogLevel.Resume, 'Audio session resumed', audioEvent.state);
-          // If audio was active, we might want to update the UI accordingly
-          if (audioEvent.state.is_audio_active) {
+        try { addLog(LogLevel.Resume, 'audio_resume received (ignored; using audio_buffer now)'); } catch {}
+        return;
+      }
+
+      // New: audio_buffer frames sent on resume; play them sequentially
+      if (msg.event === 'audio_buffer') {
+        try {
+          const frames = (msg as any).frames as Array<{ mime_type: string; data: string }>;
+          if (Array.isArray(frames) && frames.length > 0) {
+            // Stop any tool loop; we have audio to play
+            if (toolCallActiveRef.current || toolLoopingRef.current) {
+              toolCallActiveRef.current = false;
+              stopToolSoundLoop();
+            }
+            clearThinkingTimeout();
+            for (const f of frames) {
+              if (f?.mime_type?.startsWith('audio/')) {
+                playAudioChunk(f.data);
+              }
+            }
             setMode('responding');
+            if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
+            speakTimerRef.current = window.setTimeout(() => setMode('idle'), 2500);
           }
+          addLog(LogLevel.Event, 'Played audio_buffer frames', { count: Array.isArray((msg as any).frames) ? (msg as any).frames.length : 0 });
         } catch {}
         return;
       }
