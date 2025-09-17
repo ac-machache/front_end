@@ -5,9 +5,16 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
 import IAdvisor, { type IAdvisorMode } from '@/components/kokonutui/IAdvisor';
-import type { Config, SessionResumedEvent, ConnectionState, HeartbeatEvent } from '@/lib/types';
+import type { Config, SessionResumedEvent, HeartbeatEvent } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
-import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
+import {
+  useLocalStorage,
+  useWebSocket,
+  useAudioProcessor,
+  useAudioPlayback,
+  useSessionReconnection,
+  useSessionMode
+} from '@/lib/hooks';
 import { useSearchParams } from 'next/navigation';
 
 export default function SessionDetail() {
@@ -23,12 +30,18 @@ export default function SessionDetail() {
   const [serverAlive, setServerAlive] = useState<boolean>(true);
   const lastHeartbeatAtRef = useRef<number>(Date.now());
   const [isListening, setIsListening] = useState<boolean>(false);
-  
-  // Enhanced connection state for session resumption
-  const [connectionState, setConnectionState] = useState<ConnectionState>({
-    isResuming: false,
-    hasResumed: false,
-  });
+
+  // Initialize hooks
+  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
+    // Log to console for debugging - could implement UI logging later if needed
+    console.log(`[${level}] ${message}`, data);
+  }, []);
+
+  // Audio playback management
+  const audioPlayback = useAudioPlayback(addLog);
+
+  // Session mode management
+  const sessionMode = useSessionMode(addLog);
 
   // Ensure sessionId matches URL
   React.useEffect(() => {
@@ -41,11 +54,6 @@ export default function SessionDetail() {
     const cid = clientIdParam;
     if (cid && config.userId !== cid) setConfig(prev => ({ ...prev, userId: cid }));
   }, [clientIdParam, config.userId, setConfig]);
-
-  const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
-    // Log to console for debugging - could implement UI logging later if needed
-    console.log(`[${level}] ${message}`, data);
-  }, []);
 
   // Backend base detection (safe)
   const backendBase: string = useMemo(() => {
@@ -74,10 +82,7 @@ export default function SessionDetail() {
 
   const wsUrl = useMemo(() => buildWsUrlSafe(config, backendBase), [config, backendBase, buildWsUrlSafe]);
 
-  // Define after useAudioProcessor to avoid TDZ; then assign in effect
-  const onWsOpenRef = useRef<() => void>(() => {});
-
-  // Server handshake readiness and mic toggle persistence
+  // Server handshake readiness
   const serverReadyRef = useRef<boolean>(false);
   const [serverReady, setServerReady] = useState<boolean>(false);
   React.useEffect(() => { serverReadyRef.current = serverReady; }, [serverReady]);
@@ -90,31 +95,36 @@ export default function SessionDetail() {
   const sendMessageRef = useRef<(data: unknown) => void>(() => {});
   const onMicData = useCallback((base64: string) => {
     // Strict gating: drop frames unless online, server-ready, mic on, not in tool call, and connected
-    const canSend = isOnline && serverReadyRef.current && serverAlive && isMicOnRef.current && !toolCallActiveRef.current && wsStatusRef.current === WsStatus.Connected;
+    const canSend = isOnline && serverReadyRef.current && serverAlive && isMicOnRef.current && !audioPlayback.isToolCallActive() && wsStatusRef.current === WsStatus.Connected;
     if (canSend) {
       sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
     }
-  }, [isOnline, serverAlive]);
+  }, [isOnline, serverAlive, audioPlayback]);
   const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog);
+
+  // Initialize session reconnection hook
+  const sessionReconnection = useSessionReconnection(
+    addLog,
+    startMic,
+    stopMic,
+    () => connect(),
+    () => disconnect(),
+    setStreamingEnabled,
+    clearPlaybackQueue
+  );
+
+  // Define after useAudioProcessor to avoid TDZ; then assign in effect
+  const onWsOpenRef = useRef<() => void>(() => {});
+
   React.useEffect(() => {
     onWsOpenRef.current = () => {
       addLog(LogLevel.Ws, 'WebSocket connected.');
-      // Do not auto-enable streaming or mic; wait for server 'ready' and user toggle
-      setMode('idle');
+      sessionMode.resetToIdle();
       // Reset handshake readiness
       setServerReady(false);
     };
-  }, [addLog]);
-  React.useEffect(() => {
-    try {
-      const a = new Audio('/Thinking.mp3');
-      a.preload = 'auto';
-      toolSoundRef.current = a;
-      const c = new Audio('/Connected.mp3');
-      c.preload = 'auto';
-      connectedSoundRef.current = c;
-    } catch {}
-  }, []);
+  }, [addLog, sessionMode]);
+
   React.useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
@@ -123,20 +133,11 @@ export default function SessionDetail() {
     const handleOffline = () => {
       setIsOnline(false);
       addLog(LogLevel.Ws, 'Browser offline');
-      try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
-      shouldAutoReconnectRef.current = false;
-      manualDisconnectRef.current = true;
-      try { disconnectRef.current(); } catch {}
-      try { stopMicRef.current(); } catch {}
-      try { 
-        addLog(LogLevel.Audio, 'Disabling streaming');
-        setStreamingEnabled(false); 
-      } catch {}
-      // Inline stop of tool loop to avoid dependency issues
-      try { const a = toolSoundRef.current; if (a) { a.loop = false; a.pause(); a.currentTime = 0; } } catch {}
-      toolCallActiveRef.current = false;
-      // Preserve user's mic toggle; it will remain disabled by connection status
-      setMode('idle');
+      // Use the reconnection hook's manual disconnect
+      sessionReconnection.manualDisconnect();
+      // Clean up audio
+      audioPlayback.cleanup();
+      sessionMode.setDisconnected();
     };
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
@@ -144,51 +145,7 @@ export default function SessionDetail() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [addLog, setStreamingEnabled]);
-  const [mode, setMode] = useState<IAdvisorMode>('idle');
-  const speakTimerRef = useRef<number | null>(null);
-  const disconnectRef = useRef<() => void>(() => {});
-  const stopMicRef = useRef<() => void>(() => {});
-  const connectRef = useRef<() => void>(() => {});
-  const startMicRef = useRef<() => Promise<void>>(async () => {});
-  const manualDisconnectRef = useRef<boolean>(false);
-  const shouldAutoReconnectRef = useRef<boolean>(true);
-  const reconnectAttemptsRef = useRef<number>(0);
-  const reconnectTimerRef = useRef<number | null>(null);
-  const toolSoundRef = useRef<HTMLAudioElement | null>(null);
-  const connectedSoundRef = useRef<HTMLAudioElement | null>(null);
-  const toolLoopingRef = useRef<boolean>(false);
-  const toolCallActiveRef = useRef<boolean>(false);
-  const thinkingTimeoutRef = useRef<number | null>(null);
-  
-  const reconnectingRef = useRef<boolean>(false);
-  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
-
-  const startToolSoundLoop = useCallback(() => {
-    try {
-      const a = toolSoundRef.current;
-      if (!a) return;
-      a.loop = true;
-      a.currentTime = 0;
-      toolLoopingRef.current = true;
-      void a.play()?.catch(() => { try { addLog(LogLevel.Audio, 'Tool loop play blocked (autoplay)'); } catch {} });
-    } catch {}
-  }, [addLog]);
-
-  const stopToolSoundLoop = useCallback(() => {
-    try {
-      const a = toolSoundRef.current;
-      if (!a) return;
-      a.loop = false;
-      a.pause();
-      a.currentTime = 0;
-      toolLoopingRef.current = false;
-    } catch {}
-  }, []);
-
-  const clearThinkingTimeout = useCallback(() => {
-    try { if (thinkingTimeoutRef.current) { window.clearTimeout(thinkingTimeoutRef.current); thinkingTimeoutRef.current = null; } } catch {}
-  }, []);
+  }, [addLog, sessionReconnection, audioPlayback, sessionMode]);
 
   type WireMessage = { 
     event?: string; 
@@ -204,255 +161,149 @@ export default function SessionDetail() {
     if (msg?.event) {
       // Server handshake ready event
       if (msg.event === 'ready') {
-        try { 
-          addLog(LogLevel.Event, 'Server ready - audio can now be sent', {
-            micOn: isMicOnRef.current,
-            toolCallActive: toolCallActiveRef.current,
-            wsStatus: wsStatusRef.current
-          }); 
-          // Play a short cue to inform the user the model is ready
-          try {
-            const s = connectedSoundRef.current;
-            if (s) { s.currentTime = 0; void s.play()?.catch(() => {}); }
-          } catch {}
-        } catch {}
+        addLog(LogLevel.Event, 'Server ready - audio can now be sent', {
+          micOn: isMicOnRef.current,
+          toolCallActive: audioPlayback.isToolCallActive(),
+          wsStatus: wsStatusRef.current
+        });
+        // Play connected sound
+        audioPlayback.playConnectedSound();
+
         // If we are reconnecting and mic was ON before, auto-resume streaming
-        if (reconnectingRef.current && isMicOnRef.current) {
-          try { setStreamingEnabled(true); } catch {}
+        if (sessionReconnection.isReconnecting && isMicOnRef.current) {
+          setStreamingEnabled(true);
         }
-        reconnectingRef.current = false;
-        setIsReconnecting(false);
+
         serverReadyRef.current = true;
         setServerReady(true);
         return;
       }
+
       // Interrupt: stop any playback so user can speak over model
       if (msg.event === 'interrupt') {
-        try { clearPlaybackQueueRef.current(); } catch {}
+        clearPlaybackQueue();
         return;
       }
-      
+
       // Session resumption events
       if (msg.event === 'session_resumed') {
         const resumeEvent = msg as SessionResumedEvent;
-        try { 
-          addLog(LogLevel.Resume, 'Session resumed', resumeEvent.state); 
-          setConnectionState(prev => ({
-            ...prev,
-            hasResumed: true,
-            isResuming: false,
-            backendSessionState: {
-              mode: resumeEvent.state.mode,
-              turnId: resumeEvent.state.turn_id,
-              hasPendingFunctions: resumeEvent.state.has_pending_functions
-            }
-          }));
-          
-          // Clear "has resumed" status after 5 seconds
-          setTimeout(() => {
-            setConnectionState(prev => ({ ...prev, hasResumed: false }));
-          }, 5000);
-        } catch {}
+        addLog(LogLevel.Resume, 'Session resumed', resumeEvent.state);
+        sessionReconnection.handleSessionResumed(resumeEvent.state);
         return;
       }
 
-      // New speech control events
+      // Speech control events
       if (msg.event === 'speech_start') {
-        try { setIsListening(true); } catch {}
-        // Immediately stop any current playback so the user can talk over the model
-        try { clearPlaybackQueueRef.current(); } catch {}
+        setIsListening(true);
+        clearPlaybackQueue();
         return;
       }
       if (msg.event === 'speech_end') {
-        try { setIsListening(false); } catch {}
+        setIsListening(false);
         return;
       }
 
-      // New: audio_buffer frames sent on resume; play them sequentially
+      // Audio buffer frames sent on resume
       if (msg.event === 'audio_buffer') {
-        try {
-          const frames = msg.frames;
-          if (Array.isArray(frames) && frames.length > 0) {
-            // Stop any tool loop; we have audio to play
-            if (toolCallActiveRef.current || toolLoopingRef.current) {
-              toolCallActiveRef.current = false;
-              stopToolSoundLoop();
+        const frames = msg.frames;
+        if (Array.isArray(frames) && frames.length > 0) {
+          audioPlayback.playModelAudio();
+          for (const f of frames) {
+            if (f?.mime_type?.startsWith('audio/')) {
+              playAudioChunk(f.data);
             }
-            clearThinkingTimeout();
-            for (const f of frames) {
-              if (f?.mime_type?.startsWith('audio/')) {
-                playAudioChunk(f.data);
-              }
-            }
-            setMode('responding');
-            if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
-            speakTimerRef.current = window.setTimeout(() => setMode('idle'), 2500);
           }
-          addLog(LogLevel.Event, 'Played audio_buffer frames', { count: Array.isArray(msg.frames) ? msg.frames.length : 0 });
-        } catch {}
+          sessionMode.startResponding(2500);
+          addLog(LogLevel.Event, 'Played audio_buffer frames', { count: frames.length });
+        }
         return;
       }
-      
+
       // Handle heartbeat from server
       if (msg.event === 'heartbeat') {
         const heartbeatEvent = msg as HeartbeatEvent;
-        try {
-          // Respond to server heartbeat
-          sendMessageRef.current({
-            "event": "heartbeat_response",
-            "timestamp": Date.now(),
-            "server_timestamp": heartbeatEvent.timestamp
-          });
-          // Track liveness based on last heartbeat
-          lastHeartbeatAtRef.current = Date.now();
-          if (!serverAlive) setServerAlive(true);
-          addLog(LogLevel.Event, 'Heartbeat received and responded', { 
-            server_timestamp: heartbeatEvent.timestamp,
-            data: heartbeatEvent.data 
-          });
-        } catch {}
+        sendMessageRef.current({
+          "event": "heartbeat_response",
+          "timestamp": Date.now(),
+          "server_timestamp": heartbeatEvent.timestamp
+        });
+        lastHeartbeatAtRef.current = Date.now();
+        if (!serverAlive) setServerAlive(true);
+        addLog(LogLevel.Event, 'Heartbeat received and responded', {
+          server_timestamp: heartbeatEvent.timestamp,
+          data: heartbeatEvent.data
+        });
         return;
       }
-      
+
+      // Function call events
       if (msg.event === 'function_call') {
-        setMode('thinking');
-        // Pause upstream audio during tool calls (keep mic hardware on)
-        try { 
+        sessionMode.startThinking();
         addLog(LogLevel.Audio, 'Disabling streaming');
-        setStreamingEnabled(false); 
-      } catch {}
-        // Start looping tool sound until we receive model audio again
-        toolCallActiveRef.current = true;
-        startToolSoundLoop();
-        // Safety: stop thinking after 30s if no response
-        try { if (thinkingTimeoutRef.current) window.clearTimeout(thinkingTimeoutRef.current); } catch {}
-        thinkingTimeoutRef.current = window.setTimeout(() => {
-          try { addLog(LogLevel.Event, 'Thinking timeout'); } catch {}
-          toolCallActiveRef.current = false;
-          stopToolSoundLoop();
-          try { setStreamingEnabled(true); } catch {}
-          setMode('idle');
-        }, 30000);
-        // Do NOT set the pending flag yet; wait for the function_response to confirm the tool finished
-      } else if (msg.event === 'function_response') {
-        // Stop tool sound loop immediately when function completes
-        if (toolCallActiveRef.current || toolLoopingRef.current) {
-          toolCallActiveRef.current = false;
-          stopToolSoundLoop();
-        }
-        clearThinkingTimeout();
-        
-        // Resume upstream audio streaming after function response
-        try { setStreamingEnabled(true); } catch {}
-        
-        // If the model is (or was just) responding, prefer responding; otherwise idle
-        if (speakTimerRef.current) {
-          setMode('responding');
-          window.clearTimeout(speakTimerRef.current);
-          speakTimerRef.current = window.setTimeout(() => setMode('idle'), 800);
-        } else {
-          setMode('idle');
-        }
+        setStreamingEnabled(false);
+        audioPlayback.startToolCall();
+        return;
       }
+
+      if (msg.event === 'function_response') {
+        audioPlayback.endToolCall();
+        setStreamingEnabled(true);
+        sessionMode.stopThinking();
+        return;
+      }
+
       addLog(LogLevel.Event, msg.event, msg.name || msg.data);
       return;
     }
+
+    // Turn control messages
     if (msg?.turn_complete !== undefined || msg?.interrupted !== undefined) {
       addLog(LogLevel.Event, 'Turn Control', msg);
       if (msg?.interrupted) {
-        try { clearPlaybackQueueRef.current(); } catch {}
+        clearPlaybackQueue();
       }
-      clearThinkingTimeout();
-      // End any tool sound loop if still active (safety fallback)
-      if (toolCallActiveRef.current || toolLoopingRef.current) {
-        toolCallActiveRef.current = false;
-        stopToolSoundLoop();
-      }
-      // Resume upstream audio streaming after turn completion
-      try { setStreamingEnabled(true); } catch {}
-      // Prefer responding if audio frames arrived very recently, else idle
-      if (speakTimerRef.current) {
-        setMode('responding');
-        window.clearTimeout(speakTimerRef.current);
-        speakTimerRef.current = window.setTimeout(() => setMode('idle'), 800);
-      } else {
-        setMode('idle');
-      }
+      audioPlayback.endToolCall();
+      setStreamingEnabled(true);
+      sessionMode.stopThinking();
       return;
     }
+
+    // Audio data messages
     if (msg?.mime_type && msg?.data) {
       if (msg.mime_type.startsWith('audio/')) {
-        // Stop tool sound loop when model audio arrives
-        if (toolCallActiveRef.current || toolLoopingRef.current) {
-          toolCallActiveRef.current = false;
-          stopToolSoundLoop();
-        }
-        clearThinkingTimeout();
+        audioPlayback.playModelAudio();
         playAudioChunk(msg.data as string);
-        setMode('responding');
-        if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
-        speakTimerRef.current = window.setTimeout(() => setMode('idle'), 2500);
+        sessionMode.startResponding(2500);
         return;
       }
     }
-  }, [addLog, playAudioChunk, setStreamingEnabled, clearThinkingTimeout, startToolSoundLoop, stopToolSoundLoop, serverAlive]);
+  }, [addLog, audioPlayback, sessionReconnection, sessionMode, playAudioChunk, setStreamingEnabled, clearPlaybackQueue]);
   const onWsClose = useCallback((code?: number, reason?: string, wasManual?: boolean) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason, wasManual });
     // Always release microphone hardware and reset streaming gate on close
     stopMic();
-    // Ensure any tool sound loop is stopped on close
-    toolCallActiveRef.current = false;
-    stopToolSoundLoop();
-    clearThinkingTimeout();
-        addLog(LogLevel.Audio, 'Disabling streaming');
+    // Clean up audio playback
+    audioPlayback.cleanup();
+    addLog(LogLevel.Audio, 'Disabling streaming');
     setStreamingEnabled(false);
     setServerReady(false);
-    setMode('idle');
-    // Clear any speaking timers and playback queue to avoid replay on reconnect
-    try { if (speakTimerRef.current) { window.clearTimeout(speakTimerRef.current); speakTimerRef.current = null; } } catch {}
-    try { clearPlaybackQueue(); } catch {}
-    // Reset resumption state on disconnect
-    if (!wasManual) {
-      reconnectingRef.current = true;
-      setIsReconnecting(true);
-      setConnectionState(prev => ({ ...prev, isResuming: true, hasResumed: false }));
-    } else {
-      reconnectingRef.current = false;
-      setIsReconnecting(false);
-      setConnectionState(prev => ({ ...prev, isResuming: false, hasResumed: false }));
-    }
-    
-    // Auto-reconnect with backoff if not manual and allowed
-    try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
-    if (shouldAutoReconnectRef.current && !manualDisconnectRef.current && !wasManual) {
-      const attempt = reconnectAttemptsRef.current;
-      const delay = Math.min(5000, 1000 * Math.pow(2, attempt));
-      reconnectTimerRef.current = window.setTimeout(async () => {
-        try {
-          setIsConnecting(true);
-          if (isMicOnRef.current) {
-            await startMicRef.current();
-          }
-          connectRef.current();
-          reconnectAttemptsRef.current = 0;
-        } catch (err) {
-          reconnectAttemptsRef.current = attempt + 1;
-          addLog(LogLevel.Error, 'Auto-reconnect attempt failed', err);
-        }
-      }, delay);
-    }
-  }, [addLog, stopMic, setStreamingEnabled, clearPlaybackQueue, clearThinkingTimeout, stopToolSoundLoop]);
+    sessionMode.resetToIdle();
+    // Clear playback queue to avoid replay on reconnect
+    clearPlaybackQueue();
+    // Handle reconnection through the hook
+    sessionReconnection.handleConnectionClose(code, reason, wasManual);
+  }, [addLog, stopMic, audioPlayback, setStreamingEnabled, sessionMode, clearPlaybackQueue, sessionReconnection]);
+
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, () => onWsOpenRef.current(), onWsMessage, onWsClose, onWsError);
   // Keep status in a ref for early consumers
   React.useEffect(() => { wsStatusRef.current = wsStatus; }, [wsStatus]);
 
-  // Keep imperative refs in sync with latest functions
-  React.useEffect(() => { stopMicRef.current = stopMic; }, [stopMic]);
-  React.useEffect(() => { disconnectRef.current = disconnect; }, [disconnect]);
-  React.useEffect(() => { connectRef.current = connect; }, [connect]);
-  React.useEffect(() => { startMicRef.current = startMic; }, [startMic]);
-  React.useEffect(() => () => { try { if (reconnectTimerRef.current != null) window.clearTimeout(reconnectTimerRef.current); } catch {} }, []);
+  // Keep sendMessage ref in sync
+  React.useEffect(() => {
+    sendMessageRef.current = (data: unknown) => sendMessage(data);
+  }, [sendMessage]);
 
   // Server liveness monitor: if no heartbeat for 20s, mark serverAlive=false
   React.useEffect(() => {
@@ -465,22 +316,15 @@ export default function SessionDetail() {
 
   // Keep streamingEnabled in sync with connection + readiness + mic state
   React.useEffect(() => {
-    const shouldEnable = isOnline && wsStatus === WsStatus.Connected && serverReady && isMicOn && mode !== 'thinking';
+    const shouldEnable = isOnline && wsStatus === WsStatus.Connected && serverReady && isMicOn && sessionMode.mode !== 'thinking';
     setStreamingEnabled(shouldEnable);
     try { addLog(LogLevel.Audio, `Streaming ${shouldEnable ? 'enabled' : 'disabled'} (sync)`); } catch {}
-  }, [isOnline, wsStatus, serverReady, isMicOn, mode, setStreamingEnabled, addLog]);
+  }, [isOnline, wsStatus, serverReady, isMicOn, sessionMode.mode, setStreamingEnabled, addLog]);
 
-  // Keep refs in sync once hooks return functions
+  // Reset to idle when mic state changes
   React.useEffect(() => {
-    sendMessageRef.current = (data: unknown) => sendMessage(data);
-  }, [sendMessage]);
-  const clearPlaybackQueueRef = useRef<() => void>(() => {});
-  React.useEffect(() => { clearPlaybackQueueRef.current = () => clearPlaybackQueue(); }, [clearPlaybackQueue]);
-
-  // Manual connect only via UI controls to avoid auto-reconnect behavior
-  React.useEffect(() => {
-    setMode('idle');
-  }, [isMicOn]);
+    sessionMode.resetToIdle();
+  }, [isMicOn, sessionMode]);
 
   // Reset local loading flags on status changes
   React.useEffect(() => {
@@ -494,22 +338,24 @@ export default function SessionDetail() {
       if (!isOnline) return '';
       if (wsStatus !== WsStatus.Connected || !serverReady) return '';
       if (isListening) return ' • Écoute';
-      if (mode === 'thinking') return ' • En réflexion';
-      if (mode === 'responding') return ' • Réponse';
+      if (sessionMode.mode === 'thinking') return ' • En réflexion';
+      if (sessionMode.mode === 'responding') return ' • Réponse';
       return '';
     })();
-    
+
     // Show resumption status
-    if ((isReconnecting || connectionState.isResuming) && (wsStatus === WsStatus.Connecting || isConnecting)) {
-      return { text: 'Reprise de session…', classes: 'bg-blue-100 text-blue-700 border border-blue-200' };
+    if ((sessionReconnection.isReconnecting || sessionReconnection.connectionState.isResuming) && (wsStatus === WsStatus.Connecting || isConnecting)) {
+      const attemptText = sessionReconnection.reconnectAttempts > 0 ? ` (tentative ${sessionReconnection.reconnectAttempts})` : '';
+      return { text: `Reprise de session…${attemptText}`, classes: 'bg-blue-100 text-blue-700 border border-blue-200' };
     }
-    if (connectionState.hasResumed && wsStatus === WsStatus.Connected) {
-      const resumeText = connectionState.backendSessionState?.hasPendingFunctions 
-        ? 'Session reprise • Outils actifs' 
+    if (sessionReconnection.connectionState.hasResumed && wsStatus === WsStatus.Connected) {
+      const resumeText = sessionReconnection.connectionState.backendSessionState?.hasPendingFunctions
+        ? 'Session reprise • Outils actifs'
         : 'Session reprise';
-      return { text: `${resumeText}${modeSuffix}`.trim(), classes: 'bg-green-100 text-green-700 border border-green-200' };
+      // Don't show mode suffix during resumption display
+      return { text: resumeText, classes: 'bg-green-100 text-green-700 border border-green-200' };
     }
-    
+
     if (!isOnline) return { text: 'Hors ligne', classes: 'bg-red-100 text-red-700 border border-red-200' };
     if (wsStatus === WsStatus.Connected && serverReady) {
       if (!serverAlive) return { text: 'Connecté (pas de réponse serveur)', classes: 'bg-amber-100 text-amber-700 border border-amber-200' };
@@ -517,9 +363,9 @@ export default function SessionDetail() {
     }
     if (wsStatus === WsStatus.Connected && !serverReady) return { text: 'Synchronisation…', classes: 'bg-amber-100 text-amber-700 border border-amber-200' };
     if (wsStatus === WsStatus.Connecting || isConnecting) return { text: 'Connexion…', classes: 'bg-amber-100 text-amber-700 border border-amber-200' };
-    if (wsStatus === WsStatus.Error) return { text: 'Erreur', classes: 'bg-red-100 text-red-700 border border-red-200' };
+    if (wsStatus === WsStatus.Error) return { text: 'Erreur de connexion', classes: 'bg-red-100 text-red-700 border border-red-200' };
     return { text: 'Déconnecté', classes: 'bg-gray-100 text-gray-700 border border-gray-200' };
-  }, [wsStatus, isConnecting, isOnline, mode, serverReady, connectionState, isListening, isReconnecting, serverAlive]);
+  }, [wsStatus, isConnecting, isOnline, sessionMode.mode, serverReady, sessionReconnection, isListening, serverAlive]);
 
   const advisorMode: IAdvisorMode = React.useMemo(() => {
     if (!isOnline) return 'disconnected';
@@ -527,8 +373,11 @@ export default function SessionDetail() {
     if (wsStatus === WsStatus.Error || wsStatus === WsStatus.Disconnected) return 'disconnected';
     // Connected
     if (!serverReady) return 'connecting';
-    return mode; // mode is already IAdvisorMode compatible
-  }, [isOnline, wsStatus, isConnecting, mode, serverReady]);
+    // Map session mode to advisor mode
+    if (sessionMode.mode === 'connecting') return 'connecting';
+    if (sessionMode.mode === 'disconnected') return 'disconnected';
+    return sessionMode.mode; // idle, thinking, responding are compatible
+  }, [isOnline, wsStatus, isConnecting, sessionMode.mode, serverReady]);
 
   const advisorDisabled = !isOnline || wsStatus !== WsStatus.Connected || !serverReady;
 
@@ -574,7 +423,7 @@ export default function SessionDetail() {
                         addLog(LogLevel.Audio, 'Setting streaming enabled = true');
                         setStreamingEnabled(true);
                         setIsMicOn(true);
-                        setMode('idle');
+                        sessionMode.resetToIdle();
                         // Manually start mic to debug
                         try {
                           await startMic();
@@ -587,7 +436,7 @@ export default function SessionDetail() {
                         addLog(LogLevel.Audio, 'Disabling streaming');
                         setStreamingEnabled(false);
                         setIsMicOn(false);
-                        setMode('idle');
+                        sessionMode.resetToIdle();
                         stopMic();
                       }
                     }}
@@ -615,18 +464,13 @@ export default function SessionDetail() {
                   onClick={async () => {
                     // Start mic hardware on Connect; streaming remains gated by mic button
                     setIsConnecting(true);
-                    manualDisconnectRef.current = false;
-                    shouldAutoReconnectRef.current = true;
-                    try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
-                    reconnectAttemptsRef.current = 0;
                     try {
                       if (!backendBase) {
                         setIsConnecting(false);
                         addLog(LogLevel.Error, 'Missing NEXT_PUBLIC_BACKEND_BASE_URL');
                         return;
                       }
-                      await startMic();
-                      connect();
+                      await sessionReconnection.manualConnect(false);
                     } catch (err) {
                       setIsConnecting(false);
                       addLog(LogLevel.Error, 'Failed to connect', err);
@@ -643,17 +487,9 @@ export default function SessionDetail() {
                   onClick={() => {
                     // Release mic hardware cleanly on Disconnect
                     setIsDisconnecting(true);
-                    manualDisconnectRef.current = true;
-                    shouldAutoReconnectRef.current = false;
-                    try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
-                    reconnectAttemptsRef.current = 0;
                     // Inform backend of manual disconnect intent before closing
                     try { sendMessageRef.current({ event: 'client_disconnect', intent: 'manual' }); } catch {}
-                    disconnect();
-                    stopMic();
-                    addLog(LogLevel.Audio, 'Disabling streaming: disconnect button clicked');
-                    setStreamingEnabled(false);
-                    setMode('idle');
+                    sessionReconnection.manualDisconnect();
                   }}
                   variant={wsStatus === WsStatus.Connected ? 'default' : 'secondary'}
                   disabled={!isOnline || wsStatus !== WsStatus.Connected || isDisconnecting}

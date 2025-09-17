@@ -119,7 +119,7 @@ export function useWebSocket(
     socket.onopen = () => { 
       ws.current = socket; 
       setStatus(WsStatusEnum.Connected); 
-      connectionAttemptRef.current = 0; // Reset on successful connection
+      // Preserve connectionAttemptRef so auto-reconnects can append resume=true
       onOpen(); 
     };
     
@@ -306,5 +306,427 @@ export function useAudioProcessor(
   useEffect(() => () => { stopMic(); }, [stopMic]);
 
   return { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled };
+}
+
+// Audio playback management with priority system
+export function useAudioPlayback(
+  addLog: (level: LogLevel, message: string, data?: unknown) => void
+) {
+  const toolSoundRef = useRef<HTMLAudioElement | null>(null);
+  const connectedSoundRef = useRef<HTMLAudioElement | null>(null);
+  const toolLoopingRef = useRef<boolean>(false);
+  const toolCallActiveRef = useRef<boolean>(false);
+  const thinkingTimeoutRef = useRef<number | null>(null);
+
+  // Audio priority levels (higher number = higher priority)
+  enum AudioPriority {
+    NONE = 0,
+    TOOL_SOUND = 1,
+    MODEL_AUDIO = 2
+  }
+
+  const currentPriorityRef = useRef<AudioPriority>(AudioPriority.NONE);
+
+  const initSounds = useCallback(() => {
+    try {
+      if (!toolSoundRef.current) {
+        const toolSound = new Audio('/Thinking.mp3');
+        toolSound.preload = 'auto';
+        toolSound.loop = false; // We'll control looping manually
+        toolSoundRef.current = toolSound;
+      }
+      if (!connectedSoundRef.current) {
+        const connectedSound = new Audio('/Connected.mp3');
+        connectedSound.preload = 'auto';
+        connectedSoundRef.current = connectedSound;
+      }
+    } catch (err) {
+      addLog(LogLevelEnum.Error, 'Failed to initialize audio files', err);
+    }
+  }, [addLog]);
+
+  const playConnectedSound = useCallback(() => {
+    try {
+      const sound = connectedSoundRef.current;
+      if (sound) {
+        sound.currentTime = 0;
+        void sound.play().catch(() => {});
+      }
+    } catch (err) {
+      addLog(LogLevelEnum.Audio, 'Failed to play connected sound', err);
+    }
+  }, [addLog]);
+
+  const startToolSound = useCallback(() => {
+    try {
+      const sound = toolSoundRef.current;
+      if (!sound || currentPriorityRef.current >= AudioPriority.MODEL_AUDIO) {
+        return; // Don't start tool sound if model audio is playing
+      }
+
+      sound.loop = true;
+      sound.currentTime = 0;
+      toolLoopingRef.current = true;
+      currentPriorityRef.current = AudioPriority.TOOL_SOUND;
+      void sound.play().catch(() => {
+        addLog(LogLevelEnum.Audio, 'Tool loop play blocked (autoplay)');
+      });
+    } catch (err) {
+      addLog(LogLevelEnum.Audio, 'Failed to start tool sound', err);
+    }
+  }, [addLog]);
+
+  const stopToolSound = useCallback(() => {
+    try {
+      const sound = toolSoundRef.current;
+      if (!sound) return;
+
+      sound.loop = false;
+      sound.pause();
+      sound.currentTime = 0;
+      toolLoopingRef.current = false;
+
+      // Only reset priority if tool sound was the highest priority
+      if (currentPriorityRef.current === AudioPriority.TOOL_SOUND) {
+        currentPriorityRef.current = AudioPriority.NONE;
+      }
+    } catch (err) {
+      addLog(LogLevelEnum.Audio, 'Failed to stop tool sound', err);
+    }
+  }, []);
+
+  const playModelAudio = useCallback(() => {
+    // Model audio always takes priority and stops tool sounds
+    currentPriorityRef.current = AudioPriority.MODEL_AUDIO;
+    stopToolSound();
+  }, [stopToolSound]);
+
+  const endModelAudio = useCallback(() => {
+    // Model audio ended, reset to NONE (tool sounds can resume if active)
+    if (currentPriorityRef.current === AudioPriority.MODEL_AUDIO) {
+      currentPriorityRef.current = AudioPriority.NONE;
+      // If tool call was still active when model audio started, resume tool sound
+      if (toolCallActiveRef.current && !toolLoopingRef.current) {
+        startToolSound();
+      }
+    }
+  }, [startToolSound]);
+
+  const startToolCall = useCallback(() => {
+    toolCallActiveRef.current = true;
+    startToolSound();
+
+    // Set timeout for tool call completion
+    if (thinkingTimeoutRef.current) {
+      window.clearTimeout(thinkingTimeoutRef.current);
+    }
+    thinkingTimeoutRef.current = window.setTimeout(() => {
+      addLog(LogLevelEnum.Event, 'Tool call timeout - ending tool call');
+      endToolCall();
+    }, 120000);
+  }, [addLog, startToolSound]);
+
+  const endToolCall = useCallback(() => {
+    toolCallActiveRef.current = false;
+    stopToolSound();
+
+    if (thinkingTimeoutRef.current) {
+      window.clearTimeout(thinkingTimeoutRef.current);
+      thinkingTimeoutRef.current = null;
+    }
+  }, [stopToolSound]);
+
+  const cleanup = useCallback(() => {
+    stopToolSound();
+    toolCallActiveRef.current = false;
+
+    if (thinkingTimeoutRef.current) {
+      window.clearTimeout(thinkingTimeoutRef.current);
+      thinkingTimeoutRef.current = null;
+    }
+  }, [stopToolSound]);
+
+  // Initialize sounds on mount
+  useEffect(() => {
+    initSounds();
+  }, [initSounds]);
+
+  return {
+    initSounds,
+    playConnectedSound,
+    startToolSound,
+    stopToolSound,
+    playModelAudio,
+    endModelAudio,
+    startToolCall,
+    endToolCall,
+    cleanup,
+    isToolSoundPlaying: () => toolLoopingRef.current,
+    isToolCallActive: () => toolCallActiveRef.current
+  };
+}
+
+// Session reconnection management
+export function useSessionReconnection(
+  addLog: (level: LogLevel, message: string, data?: unknown) => void,
+  startMic: () => Promise<void>,
+  stopMic: () => void,
+  connect: () => void,
+  disconnect: () => void,
+  setStreamingEnabled: (enabled: boolean) => void,
+  clearPlaybackQueue: () => void
+) {
+  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
+  const [connectionState, setConnectionState] = useState<{
+    isResuming: boolean;
+    hasResumed: boolean;
+    backendSessionState?: {
+      mode: string;
+      turnId: string | number;
+      hasPendingFunctions: boolean;
+    };
+  }>({
+    isResuming: false,
+    hasResumed: false,
+  });
+
+  const manualDisconnectRef = useRef<boolean>(false);
+  const shouldAutoReconnectRef = useRef<boolean>(true);
+  const reconnectAttemptsRef = useRef<number>(0);
+  const reconnectTimerRef = useRef<number | null>(null);
+
+  const startReconnection = useCallback((isManualDisconnect: boolean = false) => {
+    if (!isManualDisconnect) {
+      setIsReconnecting(true);
+      setConnectionState(prev => ({ ...prev, isResuming: true, hasResumed: false }));
+    }
+    manualDisconnectRef.current = isManualDisconnect;
+  }, []);
+
+  const endReconnection = useCallback(() => {
+    setIsReconnecting(false);
+    setConnectionState(prev => ({ ...prev, isResuming: false }));
+
+    // Clear resumed state after 5 seconds
+    setTimeout(() => {
+      setConnectionState(prev => ({ ...prev, hasResumed: false }));
+    }, 5000);
+  }, []);
+
+  const handleSessionResumed = useCallback((state: {
+    mode: string;
+    turn_id: string | number;
+    has_pending_functions: boolean;
+  }) => {
+    setConnectionState(prev => ({
+      ...prev,
+      hasResumed: true,
+      isResuming: false,
+      backendSessionState: {
+        mode: state.mode,
+        turnId: state.turn_id,
+        hasPendingFunctions: state.has_pending_functions
+      }
+    }));
+    setIsReconnecting(false);
+  }, []);
+
+  const attemptReconnection = useCallback(async () => {
+    const attempt = reconnectAttemptsRef.current;
+    const delay = Math.min(5000, 1000 * Math.pow(2, attempt)); // Exponential backoff
+
+    // Prevent infinite reconnection attempts
+    if (attempt >= 5) {
+      addLog(LogLevelEnum.Error, 'Max reconnection attempts reached - giving up');
+      setIsReconnecting(false);
+      return;
+    }
+
+    addLog(LogLevelEnum.Ws, `Scheduling auto-reconnect attempt ${attempt + 1} in ${delay}ms`);
+
+    reconnectTimerRef.current = window.setTimeout(async () => {
+      try {
+        addLog(LogLevelEnum.Ws, `Auto-reconnect attempt ${attempt + 1} starting`);
+        setIsReconnecting(true);
+
+        await startMic();
+        connect();
+        reconnectAttemptsRef.current = 0; // Reset on success
+      } catch (err) {
+        reconnectAttemptsRef.current = attempt + 1;
+        addLog(LogLevelEnum.Error, `Auto-reconnect attempt ${attempt + 1} failed`, err);
+        // Schedule next attempt only if we haven't hit max attempts
+        if (reconnectAttemptsRef.current < 5) {
+          attemptReconnection();
+        } else {
+          setIsReconnecting(false);
+        }
+      }
+    }, delay);
+  }, [addLog, startMic, connect]);
+
+  const manualConnect = useCallback(async (restoreMicState: boolean = false) => {
+    manualDisconnectRef.current = false;
+    shouldAutoReconnectRef.current = true;
+
+    // Clear any pending reconnect timers
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    reconnectAttemptsRef.current = 0;
+
+    try {
+      await startMic();
+      if (restoreMicState) {
+        setStreamingEnabled(true);
+      }
+      connect();
+    } catch (err) {
+      addLog(LogLevelEnum.Error, 'Manual connect failed', err);
+      throw err;
+    }
+  }, [addLog, startMic, setStreamingEnabled, connect]);
+
+  const manualDisconnect = useCallback(() => {
+    manualDisconnectRef.current = true;
+    shouldAutoReconnectRef.current = false;
+
+    // Clear any pending reconnect timers
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+
+    reconnectAttemptsRef.current = 0;
+
+    // Clean up audio state
+    stopMic();
+    setStreamingEnabled(false);
+    clearPlaybackQueue();
+
+    disconnect();
+  }, [stopMic, setStreamingEnabled, clearPlaybackQueue, disconnect]);
+
+  const handleConnectionClose = useCallback((code?: number, reason?: string, wasManual?: boolean) => {
+    addLog(LogLevelEnum.Ws, 'Connection closed', { code, reason, wasManual });
+
+    if (wasManual) {
+      setConnectionState(prev => ({ ...prev, isResuming: false, hasResumed: false }));
+      setIsReconnecting(false);
+    } else {
+      startReconnection(false);
+      if (shouldAutoReconnectRef.current) {
+        attemptReconnection();
+      }
+    }
+  }, [addLog, startReconnection, attemptReconnection]);
+
+  const handleConnectionOpen = useCallback(() => {
+    endReconnection();
+  }, [endReconnection]);
+
+  const cleanup = useCallback(() => {
+    if (reconnectTimerRef.current) {
+      window.clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return cleanup;
+  }, [cleanup]);
+
+  return {
+    isReconnecting,
+    connectionState,
+    reconnectAttempts: reconnectAttemptsRef.current,
+    manualConnect,
+    manualDisconnect,
+    handleConnectionClose,
+    handleConnectionOpen,
+    handleSessionResumed,
+    cleanup
+  };
+}
+
+// Simplified mode management
+export type IAdvisorMode = 'idle' | 'thinking' | 'responding' | 'connecting' | 'disconnected';
+
+export function useSessionMode(
+  addLog: (level: LogLevel, message: string, data?: unknown) => void
+) {
+  const [mode, setMode] = useState<IAdvisorMode>('idle');
+  const speakTimerRef = useRef<number | null>(null);
+
+  const setModeWithLog = useCallback((newMode: IAdvisorMode, reason?: string) => {
+    const oldMode = mode;
+    setMode(newMode);
+    addLog(LogLevelEnum.Event, `Mode changed: ${oldMode} -> ${newMode}`, { reason });
+  }, [mode, addLog]);
+
+  const startResponding = useCallback((duration: number = 2500) => {
+    // Clear any existing timer
+    if (speakTimerRef.current) {
+      window.clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
+    }
+
+    setModeWithLog('responding', `Starting response for ${duration}ms`);
+
+    speakTimerRef.current = window.setTimeout(() => {
+      setModeWithLog('idle', 'Response timeout');
+      speakTimerRef.current = null;
+    }, duration);
+  }, [setModeWithLog]);
+
+  const startThinking = useCallback(() => {
+    setModeWithLog('thinking', 'Starting tool call');
+  }, [setModeWithLog]);
+
+  const stopThinking = useCallback(() => {
+    setModeWithLog('idle', 'Tool call completed');
+  }, [setModeWithLog]);
+
+  const resetToIdle = useCallback(() => {
+    if (speakTimerRef.current) {
+      window.clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
+    }
+    setModeWithLog('idle', 'Manual reset');
+  }, [setModeWithLog]);
+
+  const setConnecting = useCallback(() => {
+    setModeWithLog('connecting', 'Connection in progress');
+  }, [setModeWithLog]);
+
+  const setDisconnected = useCallback(() => {
+    setModeWithLog('disconnected', 'Connection lost');
+  }, [setModeWithLog]);
+
+  const cleanup = useCallback(() => {
+    if (speakTimerRef.current) {
+      window.clearTimeout(speakTimerRef.current);
+      speakTimerRef.current = null;
+    }
+  }, []);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return cleanup;
+  }, [cleanup]);
+
+  return {
+    mode,
+    startResponding,
+    startThinking,
+    stopThinking,
+    resetToIdle,
+    setConnecting,
+    setDisconnected,
+    cleanup
+  };
 }
 
