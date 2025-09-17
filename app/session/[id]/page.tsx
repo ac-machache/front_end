@@ -641,6 +641,8 @@ export default function SessionDetail() {
                     shouldAutoReconnectRef.current = false;
                     try { if (reconnectTimerRef.current != null) { window.clearTimeout(reconnectTimerRef.current); reconnectTimerRef.current = null; } } catch {}
                     reconnectAttemptsRef.current = 0;
+                    // Inform backend of manual disconnect intent before closing
+                    try { sendMessageRef.current({ event: 'client_disconnect', intent: 'manual' }); } catch {}
                     disconnect();
                     stopMic();
                     addLog(LogLevel.Audio, 'Disabling streaming: disconnect button clicked');
