@@ -4,12 +4,10 @@ import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Loader2 } from 'lucide-react';
-// removed Loader2-based status row in events panel
 import IAdvisor, { type IAdvisorMode } from '@/components/kokonutui/IAdvisor';
 import type { Config, SessionResumedEvent, ConnectionState, HeartbeatEvent } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
-import { useLocalStorage, useWebSocket, useAudioProcessor, useApiClient } from '@/lib/hooks';
-// Avoid throwing when BACKEND_BASE_URL is missing; build WS URL safely here
+import { useLocalStorage, useWebSocket, useAudioProcessor } from '@/lib/hooks';
 import { useSearchParams } from 'next/navigation';
 
 export default function SessionDetail() {
@@ -75,13 +73,10 @@ export default function SessionDetail() {
   }, []);
 
   const wsUrl = useMemo(() => buildWsUrlSafe(config, backendBase), [config, backendBase, buildWsUrlSafe]);
-  // No HTTP calls here; realtime over WebSocket only
 
   // Define after useAudioProcessor to avoid TDZ; then assign in effect
   const onWsOpenRef = useRef<() => void>(() => {});
 
-  // Epochs and turn tracking for robustness
-  
   // Server handshake readiness and mic toggle persistence
   const serverReadyRef = useRef<boolean>(false);
   const [serverReady, setServerReady] = useState<boolean>(false);
@@ -106,8 +101,6 @@ export default function SessionDetail() {
       addLog(LogLevel.Ws, 'WebSocket connected.');
       // Do not auto-enable streaming or mic; wait for server 'ready' and user toggle
       setMode('idle');
-      hasIngestedRef.current = false;
-      // New connection epoch (no-op; kept for future metrics)
       // Reset handshake readiness
       setServerReady(false);
     };
@@ -152,11 +145,8 @@ export default function SessionDetail() {
       window.removeEventListener('offline', handleOffline);
     };
   }, [addLog, setStreamingEnabled]);
-  // Transcription display disabled for now
-  // const [toolLabel, setToolLabel] = useState<string>('');
   const [mode, setMode] = useState<IAdvisorMode>('idle');
   const speakTimerRef = useRef<number | null>(null);
-  const reportToolPendingRef = useRef<boolean>(false);
   const disconnectRef = useRef<() => void>(() => {});
   const stopMicRef = useRef<() => void>(() => {});
   const connectRef = useRef<() => void>(() => {});
@@ -169,7 +159,6 @@ export default function SessionDetail() {
   const connectedSoundRef = useRef<HTMLAudioElement | null>(null);
   const toolLoopingRef = useRef<boolean>(false);
   const toolCallActiveRef = useRef<boolean>(false);
-  const hasIngestedRef = useRef<boolean>(false);
   const thinkingTimeoutRef = useRef<number | null>(null);
   
   const reconnectingRef = useRef<boolean>(false);
@@ -201,17 +190,18 @@ export default function SessionDetail() {
     try { if (thinkingTimeoutRef.current) { window.clearTimeout(thinkingTimeoutRef.current); thinkingTimeoutRef.current = null; } } catch {}
   }, []);
 
-  
-
-  type WireMessage = { event?: string; name?: string; turn_complete?: unknown; interrupted?: unknown; mime_type?: string; data?: unknown };
+  type WireMessage = { 
+    event?: string; 
+    name?: string; 
+    turn_complete?: unknown; 
+    interrupted?: unknown; 
+    mime_type?: string; 
+    data?: unknown;
+    frames?: Array<{ mime_type: string; data: string }>;
+  };
   const onWsMessage = useCallback((data: unknown) => {
     const msg = data as WireMessage;
     if (msg?.event) {
-      // Handle function call/response indicators
-      const name: string = (msg?.name || '') as string;
-      const lower = name.toLowerCase();
-      // New report tool identifier
-      const isReportTool = lower.includes('reportsynthesizer');
       // Server handshake ready event
       if (msg.event === 'ready') {
         try { 
@@ -265,8 +255,6 @@ export default function SessionDetail() {
         } catch {}
         return;
       }
-      
-      // Remove back-compat audio_resume handling
 
       // New speech control events
       if (msg.event === 'speech_start') {
@@ -283,7 +271,7 @@ export default function SessionDetail() {
       // New: audio_buffer frames sent on resume; play them sequentially
       if (msg.event === 'audio_buffer') {
         try {
-          const frames = (msg as any).frames as Array<{ mime_type: string; data: string }>;
+          const frames = msg.frames;
           if (Array.isArray(frames) && frames.length > 0) {
             // Stop any tool loop; we have audio to play
             if (toolCallActiveRef.current || toolLoopingRef.current) {
@@ -300,7 +288,7 @@ export default function SessionDetail() {
             if (speakTimerRef.current) window.clearTimeout(speakTimerRef.current);
             speakTimerRef.current = window.setTimeout(() => setMode('idle'), 2500);
           }
-          addLog(LogLevel.Event, 'Played audio_buffer frames', { count: Array.isArray((msg as any).frames) ? (msg as any).frames.length : 0 });
+          addLog(LogLevel.Event, 'Played audio_buffer frames', { count: Array.isArray(msg.frames) ? msg.frames.length : 0 });
         } catch {}
         return;
       }
@@ -347,18 +335,16 @@ export default function SessionDetail() {
         }, 30000);
         // Do NOT set the pending flag yet; wait for the function_response to confirm the tool finished
       } else if (msg.event === 'function_response') {
-        // If this was the ReportSynthesizer, mark pending and wait for turn control before closing
-        if (isReportTool) {
-          reportToolPendingRef.current = true;
-          // Stop tool sound loop for report tool; we're navigating away shortly
+        // Stop tool sound loop immediately when function completes
+        if (toolCallActiveRef.current || toolLoopingRef.current) {
           toolCallActiveRef.current = false;
           stopToolSoundLoop();
-          clearThinkingTimeout();
-        } else {
-          // Resume upstream if not waiting for report tool
-          try { setStreamingEnabled(true); } catch {}
-          // Keep loop running for non-report tools until we actually get audio or turn control
         }
+        clearThinkingTimeout();
+        
+        // Resume upstream audio streaming after function response
+        try { setStreamingEnabled(true); } catch {}
+        
         // If the model is (or was just) responding, prefer responding; otherwise idle
         if (speakTimerRef.current) {
           setMode('responding');
@@ -377,34 +363,12 @@ export default function SessionDetail() {
         try { clearPlaybackQueueRef.current(); } catch {}
       }
       clearThinkingTimeout();
-      // End any tool sound loop if still active
+      // End any tool sound loop if still active (safety fallback)
       if (toolCallActiveRef.current || toolLoopingRef.current) {
         toolCallActiveRef.current = false;
         stopToolSoundLoop();
       }
-      // clear any previous tool indicator
-      // If report tool just finished, ingest memory and go back to list with clientId
-      if (reportToolPendingRef.current) {
-        reportToolPendingRef.current = false;
-        // Navigating away after report completion; do not auto-reconnect
-        shouldAutoReconnectRef.current = false;
-        try { disconnectRef.current(); } catch {}
-        try { stopMicRef.current(); } catch {}
-        try { 
-        addLog(LogLevel.Audio, 'Disabling streaming: offline handler');
-        setStreamingEnabled(false); 
-      } catch {}
-        setIsMicOn(false);
-        setMode('idle');
-        // Fire-and-forget ingest; use keepalive in client to survive navigation
-        if (!hasIngestedRef.current) {
-          hasIngestedRef.current = true;
-          try { void apiRef.current.ingestSessionMemory(false); } catch {}
-        }
-        router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session');
-        return;
-      }
-      // Otherwise resume upstream
+      // Resume upstream audio streaming after turn completion
       try { setStreamingEnabled(true); } catch {}
       // Prefer responding if audio frames arrived very recently, else idle
       if (speakTimerRef.current) {
@@ -431,9 +395,7 @@ export default function SessionDetail() {
         return;
       }
     }
-    // Do not log unhandled messages
-    // addLog(LogLevel.Ws, 'Received unhandled message', data);
-  }, [addLog, playAudioChunk, setStreamingEnabled, router, clientIdParam, disconnectRef, stopMicRef, clearThinkingTimeout, startToolSoundLoop, stopToolSoundLoop, isOnline]);
+  }, [addLog, playAudioChunk, setStreamingEnabled, clearThinkingTimeout, startToolSoundLoop, stopToolSoundLoop, serverAlive]);
   const onWsClose = useCallback((code?: number, reason?: string, wasManual?: boolean) => {
     addLog(LogLevel.Ws, 'WebSocket disconnected', { code, reason, wasManual });
     // Always release microphone hardware and reset streaming gate on close
@@ -449,7 +411,6 @@ export default function SessionDetail() {
     // Clear any speaking timers and playback queue to avoid replay on reconnect
     try { if (speakTimerRef.current) { window.clearTimeout(speakTimerRef.current); speakTimerRef.current = null; } } catch {}
     try { clearPlaybackQueue(); } catch {}
-    // Drop any buffered mic frames on hard disconnect (optional; we keep until next connect)
     // Reset resumption state on disconnect
     if (!wasManual) {
       reconnectingRef.current = true;
@@ -472,7 +433,6 @@ export default function SessionDetail() {
           if (isMicOnRef.current) {
             await startMicRef.current();
           }
-          // Reconnect with resume=true
           connectRef.current();
           reconnectAttemptsRef.current = 0;
         } catch (err) {
@@ -481,14 +441,11 @@ export default function SessionDetail() {
         }
       }, delay);
     }
-  }, [addLog, stopMic, setStreamingEnabled]);
+  }, [addLog, stopMic, setStreamingEnabled, clearPlaybackQueue, clearThinkingTimeout, stopToolSoundLoop]);
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, () => onWsOpenRef.current(), onWsMessage, onWsClose, onWsError);
   // Keep status in a ref for early consumers
   React.useEffect(() => { wsStatusRef.current = wsStatus; }, [wsStatus]);
-  const api = useApiClient(config, addLog);
-  const apiRef = useRef(api);
-  React.useEffect(() => { apiRef.current = api; }, [api]);
 
   // Keep imperative refs in sync with latest functions
   React.useEffect(() => { stopMicRef.current = stopMic; }, [stopMic]);
@@ -524,8 +481,6 @@ export default function SessionDetail() {
   React.useEffect(() => {
     setMode('idle');
   }, [isMicOn]);
-
-  // Events text removed; visual handled by IAdvisor
 
   // Reset local loading flags on status changes
   React.useEffect(() => {
@@ -564,7 +519,7 @@ export default function SessionDetail() {
     if (wsStatus === WsStatus.Connecting || isConnecting) return { text: 'Connexion…', classes: 'bg-amber-100 text-amber-700 border border-amber-200' };
     if (wsStatus === WsStatus.Error) return { text: 'Erreur', classes: 'bg-red-100 text-red-700 border border-red-200' };
     return { text: 'Déconnecté', classes: 'bg-gray-100 text-gray-700 border border-gray-200' };
-  }, [wsStatus, isConnecting, isOnline, mode, serverReady, connectionState, isListening]);
+  }, [wsStatus, isConnecting, isOnline, mode, serverReady, connectionState, isListening, isReconnecting, serverAlive]);
 
   const advisorMode: IAdvisorMode = React.useMemo(() => {
     if (!isOnline) return 'disconnected';
