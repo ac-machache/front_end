@@ -122,6 +122,10 @@ export default function SessionDetail() {
       sessionMode.resetToIdle();
       // Reset handshake readiness
       setServerReady(false);
+      // Reset server alive status and heartbeat timer on reconnection
+      setServerAlive(true);
+      lastHeartbeatAtRef.current = Date.now();
+      addLog(LogLevel.Ws, 'Reset server liveness on reconnection');
     };
   }, [addLog, sessionMode]);
 
@@ -215,6 +219,12 @@ export default function SessionDetail() {
             }
           }
           sessionMode.startResponding(2500);
+
+          // End model audio after the response timeout
+          setTimeout(() => {
+            audioPlayback.endModelAudio();
+          }, 2500);
+
           addLog(LogLevel.Event, 'Played audio_buffer frames', { count: frames.length });
         }
         return;
@@ -275,6 +285,12 @@ export default function SessionDetail() {
         audioPlayback.playModelAudio();
         playAudioChunk(msg.data as string);
         sessionMode.startResponding(2500);
+
+        // End model audio after the response timeout
+        setTimeout(() => {
+          audioPlayback.endModelAudio();
+        }, 2500);
+
         return;
       }
     }

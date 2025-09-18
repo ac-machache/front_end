@@ -308,7 +308,7 @@ export function useAudioProcessor(
   return { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled };
 }
 
-// Audio playback management with priority system
+// Audio playback management with intelligent priority system
 export function useAudioPlayback(
   addLog: (level: LogLevel, message: string, data?: unknown) => void
 ) {
@@ -318,14 +318,13 @@ export function useAudioPlayback(
   const toolCallActiveRef = useRef<boolean>(false);
   const thinkingTimeoutRef = useRef<number | null>(null);
 
-  // Audio priority levels (higher number = higher priority)
-  enum AudioPriority {
-    NONE = 0,
-    TOOL_SOUND = 1,
-    MODEL_AUDIO = 2
-  }
-
-  const currentPriorityRef = useRef<AudioPriority>(AudioPriority.NONE);
+  // Audio state tracking
+  const audioStateRef = useRef({
+    currentPriority: 'NONE' as 'NONE' | 'TOOL_SOUND' | 'MODEL_AUDIO',
+    toolCallPending: false, // True when tool call is active but sound might be interrupted
+    modelAudioPlaying: false, // True when model audio is currently being played
+    resumeToolSoundAfterModel: false // True when we should resume tool sound after model audio
+  });
 
   const initSounds = useCallback(() => {
     try {
@@ -360,16 +359,38 @@ export function useAudioPlayback(
   const startToolSound = useCallback(() => {
     try {
       const sound = toolSoundRef.current;
-      if (!sound || currentPriorityRef.current >= AudioPriority.MODEL_AUDIO) {
-        return; // Don't start tool sound if model audio is playing
+      const state = audioStateRef.current;
+
+      addLog(LogLevelEnum.Audio, 'Attempting to start tool sound', {
+        soundExists: !!sound,
+        currentPriority: state.currentPriority,
+        modelAudioPlaying: state.modelAudioPlaying,
+        toolCallPending: state.toolCallPending,
+        resumeToolSoundAfterModel: state.resumeToolSoundAfterModel
+      });
+
+      // Don't start tool sound if model audio is currently playing
+      if (!sound || state.modelAudioPlaying) {
+        // Mark that we want to resume tool sound after model audio finishes
+        if (state.toolCallPending) {
+          state.resumeToolSoundAfterModel = true;
+          addLog(LogLevelEnum.Audio, 'Tool sound deferred - model audio playing, will resume after');
+        } else {
+          addLog(LogLevelEnum.Audio, 'Tool sound blocked - model audio playing');
+        }
+        return;
       }
 
+      // Start tool sound
       sound.loop = true;
       sound.currentTime = 0;
       toolLoopingRef.current = true;
-      currentPriorityRef.current = AudioPriority.TOOL_SOUND;
-      void sound.play().catch(() => {
-        addLog(LogLevelEnum.Audio, 'Tool loop play blocked (autoplay)');
+      state.currentPriority = 'TOOL_SOUND';
+      state.resumeToolSoundAfterModel = false; // Clear the resume flag
+
+      addLog(LogLevelEnum.Audio, 'Starting tool sound loop');
+      void sound.play().catch((err) => {
+        addLog(LogLevelEnum.Audio, 'Tool loop play blocked (autoplay)', err);
       });
     } catch (err) {
       addLog(LogLevelEnum.Audio, 'Failed to start tool sound', err);
@@ -379,6 +400,8 @@ export function useAudioPlayback(
   const stopToolSound = useCallback(() => {
     try {
       const sound = toolSoundRef.current;
+      const state = audioStateRef.current;
+
       if (!sound) return;
 
       sound.loop = false;
@@ -386,34 +409,72 @@ export function useAudioPlayback(
       sound.currentTime = 0;
       toolLoopingRef.current = false;
 
-      // Only reset priority if tool sound was the highest priority
-      if (currentPriorityRef.current === AudioPriority.TOOL_SOUND) {
-        currentPriorityRef.current = AudioPriority.NONE;
+      // Reset priority if tool sound was playing
+      if (state.currentPriority === 'TOOL_SOUND') {
+        state.currentPriority = 'NONE';
       }
+
+      addLog(LogLevelEnum.Audio, 'Stopped tool sound');
     } catch (err) {
       addLog(LogLevelEnum.Audio, 'Failed to stop tool sound', err);
     }
-  }, []);
+  }, [addLog]);
 
   const playModelAudio = useCallback(() => {
-    // Model audio always takes priority and stops tool sounds
-    currentPriorityRef.current = AudioPriority.MODEL_AUDIO;
-    stopToolSound();
-  }, [stopToolSound]);
+    const state = audioStateRef.current;
+
+    addLog(LogLevelEnum.Audio, 'Playing model audio', {
+      currentPriority: state.currentPriority,
+      toolCallPending: state.toolCallPending,
+      resumeToolSoundAfterModel: state.resumeToolSoundAfterModel
+    });
+
+    // Model audio always takes priority
+    const wasToolSoundPlaying = state.currentPriority === 'TOOL_SOUND';
+    state.currentPriority = 'MODEL_AUDIO';
+    state.modelAudioPlaying = true;
+
+    // Stop tool sound if playing, but remember to resume it after if tool call is still active
+    if (wasToolSoundPlaying) {
+      if (state.toolCallPending) {
+        state.resumeToolSoundAfterModel = true;
+        addLog(LogLevelEnum.Audio, 'Tool sound interrupted by model audio - will resume after');
+      }
+      stopToolSound();
+    }
+  }, [stopToolSound, addLog]);
 
   const endModelAudio = useCallback(() => {
-    // Model audio ended, reset to NONE (tool sounds can resume if active)
-    if (currentPriorityRef.current === AudioPriority.MODEL_AUDIO) {
-      currentPriorityRef.current = AudioPriority.NONE;
-      // If tool call was still active when model audio started, resume tool sound
-      if (toolCallActiveRef.current && !toolLoopingRef.current) {
-        startToolSound();
-      }
+    const state = audioStateRef.current;
+
+    addLog(LogLevelEnum.Audio, 'Model audio ended', {
+      toolCallPending: state.toolCallPending,
+      resumeToolSoundAfterModel: state.resumeToolSoundAfterModel
+    });
+
+    // Model audio ended
+    state.modelAudioPlaying = false;
+    state.currentPriority = 'NONE';
+
+    // Resume tool sound if we were supposed to and tool call is still active
+    if (state.resumeToolSoundAfterModel && state.toolCallPending && !toolLoopingRef.current) {
+      state.resumeToolSoundAfterModel = false;
+      addLog(LogLevelEnum.Audio, 'Resuming tool sound after model audio ended');
+      startToolSound();
     }
-  }, [startToolSound]);
+  }, [startToolSound, addLog]);
 
   const startToolCall = useCallback(() => {
+    const state = audioStateRef.current;
+
     toolCallActiveRef.current = true;
+    state.toolCallPending = true;
+
+    addLog(LogLevelEnum.Audio, 'Starting tool call', {
+      toolCallActive: toolCallActiveRef.current,
+      toolCallPending: state.toolCallPending
+    });
+
     startToolSound();
 
     // Set timeout for tool call completion
@@ -427,18 +488,34 @@ export function useAudioPlayback(
   }, [addLog, startToolSound]);
 
   const endToolCall = useCallback(() => {
+    const state = audioStateRef.current;
+
     toolCallActiveRef.current = false;
+    state.toolCallPending = false;
+    state.resumeToolSoundAfterModel = false; // Clear any pending resume
+
+    addLog(LogLevelEnum.Audio, 'Ending tool call', {
+      toolCallActive: toolCallActiveRef.current,
+      toolCallPending: state.toolCallPending
+    });
+
     stopToolSound();
 
     if (thinkingTimeoutRef.current) {
       window.clearTimeout(thinkingTimeoutRef.current);
       thinkingTimeoutRef.current = null;
     }
-  }, [stopToolSound]);
+  }, [stopToolSound, addLog]);
 
   const cleanup = useCallback(() => {
+    const state = audioStateRef.current;
+
     stopToolSound();
     toolCallActiveRef.current = false;
+    state.toolCallPending = false;
+    state.resumeToolSoundAfterModel = false;
+    state.modelAudioPlaying = false;
+    state.currentPriority = 'NONE';
 
     if (thinkingTimeoutRef.current) {
       window.clearTimeout(thinkingTimeoutRef.current);
