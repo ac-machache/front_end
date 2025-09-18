@@ -97,7 +97,7 @@ export function useWebSocket(
 ) {
   const ws = useRef<WebSocket | null>(null);
   const isManuallyClosingRef = useRef(false);
-  const connectionAttemptRef = useRef(0);
+  const hasConnectedSuccessfullyRef = useRef(false); // New ref to track connection success
   const [status, setStatus] = useState<WsStatus>(WsStatusEnum.Disconnected);
   
   const connect = useCallback((resumeConnection = false) => {
@@ -109,17 +109,16 @@ export function useWebSocket(
     }
     setStatus(WsStatusEnum.Connecting);
     isManuallyClosingRef.current = false;
-    connectionAttemptRef.current += 1;
     
-    // Build URL with resume parameter if this is a reconnection attempt
-    const wsUrl = resumeConnection ? `${url}&resume=true` : url;
+    // Do not auto-add resume=true; rely on explicit server events/UI
+    const wsUrl = url;
     const socket = new WebSocket(wsUrl);
     socket.binaryType = 'arraybuffer';
     
     socket.onopen = () => { 
       ws.current = socket; 
-      setStatus(WsStatusEnum.Connected); 
-      // Preserve connectionAttemptRef so auto-reconnects can append resume=true
+      setStatus(WsStatusEnum.Connected);
+      hasConnectedSuccessfullyRef.current = true; // Mark that we've had a successful connection
       onOpen(); 
     };
     
@@ -150,11 +149,8 @@ export function useWebSocket(
     ws.current = socket;
   }, [url, onOpen, onMessage, onClose, onError]);
   
-  // Enhanced connect for resumption
-  const connectWithResume = useCallback(() => {
-    const shouldResume = connectionAttemptRef.current > 0; // Resume if this isn't the first connection
-    connect(shouldResume);
-  }, [connect]);
+  // No auto-resume: just call connect as-is
+  const connectWithResume = useCallback(() => { connect(false); }, [connect]);
   
   const disconnect = useCallback(() => {
     if (!ws.current) { setStatus(WsStatusEnum.Disconnected); return; }
@@ -181,7 +177,7 @@ export function useWebSocket(
     disconnect, 
     sendMessage, 
     status,
-    isFirstConnection: connectionAttemptRef.current === 0
+    isFirstConnection: !hasConnectedSuccessfullyRef.current
   };
 }
 
@@ -250,11 +246,12 @@ export function useAudioProcessor(
         addLog(LogLevelEnum.Audio, 'Starting microphone flush timer');
         micFlushTimer.current = window.setInterval(() => {
           const queueLength = micChunkQueue.current.length;
-          addLog(LogLevelEnum.Audio, 'Timer tick', { 
-            queueLength, 
-            streamingEnabled: streamingEnabledRef.current,
-            timerRunning: true
-          });
+          // Reduced verbosity: keep minimal tick info only when troubleshooting
+          // addLog(LogLevelEnum.Audio, 'Timer tick', {
+          //   queueLength,
+          //   streamingEnabled: streamingEnabledRef.current,
+          //   timerRunning: true
+          // });
           
           if (queueLength === 0) {
             return;
@@ -262,11 +259,7 @@ export function useAudioProcessor(
           
           let total = 0; for (const c of micChunkQueue.current) total += c.length;
           const combined = new Uint8Array(total); let off = 0; for (const c of micChunkQueue.current) { combined.set(c, off); off += c.length; }
-          addLog(LogLevelEnum.Audio, 'Processing audio chunks', { 
-            chunkCount: queueLength, 
-            totalBytes: total,
-            streamingEnabled: streamingEnabledRef.current 
-          });
+          // Remove noisy audio chunk processing logs
           micChunkQueue.current = [];
           
           if (streamingEnabledRef.current) {
@@ -568,7 +561,8 @@ export function useSessionReconnection(
   });
 
   const manualDisconnectRef = useRef<boolean>(false);
-  const shouldAutoReconnectRef = useRef<boolean>(true);
+  // Disable auto-reconnect: keep simple flags for UI only
+  const shouldAutoReconnectRef = useRef<boolean>(false);
   const reconnectAttemptsRef = useRef<number>(0);
   const reconnectTimerRef = useRef<number | null>(null);
 
@@ -608,43 +602,14 @@ export function useSessionReconnection(
     setIsReconnecting(false);
   }, []);
 
+  // Remove auto-reconnect attempts
   const attemptReconnection = useCallback(async () => {
-    const attempt = reconnectAttemptsRef.current;
-    const delay = Math.min(5000, 1000 * Math.pow(2, attempt)); // Exponential backoff
-
-    // Prevent infinite reconnection attempts
-    if (attempt >= 5) {
-      addLog(LogLevelEnum.Error, 'Max reconnection attempts reached - giving up');
-      setIsReconnecting(false);
-      return;
-    }
-
-    addLog(LogLevelEnum.Ws, `Scheduling auto-reconnect attempt ${attempt + 1} in ${delay}ms`);
-
-    reconnectTimerRef.current = window.setTimeout(async () => {
-      try {
-        addLog(LogLevelEnum.Ws, `Auto-reconnect attempt ${attempt + 1} starting`);
-        setIsReconnecting(true);
-
-        await startMic();
-        connect();
-        reconnectAttemptsRef.current = 0; // Reset on success
-      } catch (err) {
-        reconnectAttemptsRef.current = attempt + 1;
-        addLog(LogLevelEnum.Error, `Auto-reconnect attempt ${attempt + 1} failed`, err);
-        // Schedule next attempt only if we haven't hit max attempts
-        if (reconnectAttemptsRef.current < 5) {
-          attemptReconnection();
-        } else {
-          setIsReconnecting(false);
-        }
-      }
-    }, delay);
-  }, [addLog, startMic, connect]);
+    addLog(LogLevelEnum.Ws, 'Auto-reconnect disabled; waiting for manual action');
+  }, [addLog]);
 
   const manualConnect = useCallback(async (restoreMicState: boolean = false) => {
     manualDisconnectRef.current = false;
-    shouldAutoReconnectRef.current = true;
+    shouldAutoReconnectRef.current = false;
 
     // Clear any pending reconnect timers
     if (reconnectTimerRef.current) {
@@ -693,10 +658,8 @@ export function useSessionReconnection(
       setConnectionState(prev => ({ ...prev, isResuming: false, hasResumed: false }));
       setIsReconnecting(false);
     } else {
+      // No auto reconnect; just update state for UI
       startReconnection(false);
-      if (shouldAutoReconnectRef.current) {
-        attemptReconnection();
-      }
     }
   }, [addLog, startReconnection, attemptReconnection]);
 
