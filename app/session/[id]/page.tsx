@@ -24,12 +24,15 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 import { TelephoneSolid } from '@mynaui/icons-react';
 import { PanelRightOpenSolid } from '@mynaui/icons-react';
 import { routeWsMessage } from '@/lib/wsRouter';
+import { getClientSessionDoc } from '@/lib/firebase';
+import { useAuth } from '@/components/auth/AuthProvider';
 
 export default function SessionDetail() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
   const clientIdParam = searchParams?.get('clientId') || '';
+  const { user } = useAuth();
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
 
   // Consolidated UI and connection state
@@ -100,18 +103,31 @@ export default function SessionDetail() {
     if (cid && config.userId !== cid) setConfig(prev => ({ ...prev, userId: cid }));
   }, [clientIdParam, config.userId, setConfig]);
 
-  // Fetch report (once) for this session id
+  // Fetch report (once) for this session id: prefer Firestore ReportKey for speed, fallback to backend
   React.useEffect(() => {
     const id = params?.id as string;
     if (!id || !clientIdParam) { setReportDetails(null); return; }
     setReportLoading(true);
     (async () => {
-      const details = await apiClient.getSession(id) as SessionDetails | null;
-      setReportDetails(details);
-      setReportLoading(false);
+      try {
+        // Prefer Firestore ReportKey if present (requires user.uid)
+        if (user?.uid) {
+          const fsDoc = await getClientSessionDoc(user.uid, clientIdParam, id);
+          const reportKey = (fsDoc as unknown as { ReportKey?: unknown; nom_tc?: string; nom_agri?: string })?.ReportKey;
+          if (reportKey) {
+            setReportDetails({ id, state: { RapportDeSortie: reportKey, nom_tc: (fsDoc as { nom_tc?: string }).nom_tc, nom_agri: (fsDoc as { nom_agri?: string }).nom_agri } } as SessionDetails);
+            return;
+          }
+        }
+        // Fallback to backend
+        const details = await apiClient.getSession(id) as SessionDetails | null;
+        setReportDetails(details);
+      } finally {
+        setReportLoading(false);
+      }
     })().catch(() => setReportLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [params?.id, clientIdParam]);
+  }, [params?.id, clientIdParam, user?.uid]);
 
   // Backend base detection (safe)
   const backendBase: string = useMemo(() => {
@@ -424,8 +440,8 @@ export default function SessionDetail() {
     (React as unknown as { __streamGatePrev?: { current: boolean } }).__streamGatePrev = { current: shouldEnable };
 
     // Play connected sound once when streaming becomes active after user-initiated Connect
-    const prev = (React as any).__prevShouldEnable as { current?: boolean } | undefined;
-    if (!prev || typeof prev.current !== 'boolean') { (React as any).__prevShouldEnable = { current: shouldEnable }; }
+    const prev = (React as unknown as { __prevShouldEnable?: { current?: boolean } }).__prevShouldEnable;
+    if (!prev || typeof prev.current !== 'boolean') { (React as unknown as { __prevShouldEnable?: { current?: boolean } }).__prevShouldEnable = { current: shouldEnable }; }
     const prevVal = prev?.current ?? false;
     if (!prevVal && shouldEnable && pendingConnectedSoundRef.current && !connectedSoundPlayedRef.current) {
       try { audioPlayback.playConnectedSound(); } catch {}
@@ -762,6 +778,8 @@ export default function SessionDetail() {
                           return;
                         }
                         await safeManualConnect();
+                        // After WS is up and server ready, the mic button controls hardware.
+                        // We keep streamingOff until user toggles the Ear, avoiding premature gating.
                       } catch (err) {
                         setUiState(prev => ({ ...prev, isConnecting: false }));
                 setSessionStarted(false);

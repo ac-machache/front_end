@@ -8,8 +8,8 @@ import { LogLevel } from '@/lib/types';
 import { useApiClient } from '@/lib/hooks';
 import { Loader2 } from 'lucide-react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { getClientById, listSessionsForClient, setClientSessionDoc, updateClientSessionDoc } from '@/lib/firebase';
-import { ChevronRightCircleSolid, BookOpenSolid, ChatPlusSolid, RefreshAltSolid, PanelRightOpenSolid } from '@mynaui/icons-react';
+import { getClientById, listSessionsForClient, setClientSessionDoc, updateClientSessionDoc, deleteClientSessionDoc } from '@/lib/firebase';
+import { ChevronRightCircleSolid, BookOpenSolid, ChatPlusSolid, RefreshAltSolid, PanelRightOpenSolid, TrashOneSolid, BookImageSolid } from '@mynaui/icons-react';
 import Link from 'next/link';
 
 type ClientDoc = { id: string; name?: string; email?: string };
@@ -33,7 +33,7 @@ function SessionsPageInner() {
   const [expandedStrategicSection, setExpandedStrategicSection] = React.useState<React.Key | null>('proactive_insights');
 
   // Liste des sessions: maintenant stockée dans Firestore (sessions du client)
-  const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; is_report_done?: boolean }>>([]);
+  const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; is_report_done?: boolean; saved?: boolean }>>([]);
   const [reportReadyById, setReportReadyById] = React.useState<Record<string, boolean>>({});
 
   // Client (pour nom_agri)
@@ -64,6 +64,8 @@ function SessionsPageInner() {
   // Stabilize backend getter across renders to avoid effect loops
   const getSessionRef = React.useRef<(id: string) => Promise<SessionDetails | null>>(async () => null);
   React.useEffect(() => { getSessionRef.current = (apiClient.getSession as (id: string) => Promise<SessionDetails | null>); }, [apiClient]);
+  const listSessionsRef = React.useRef<() => Promise<Session[] | null>>(async () => null);
+  React.useEffect(() => { listSessionsRef.current = (apiClient.listSessions as () => Promise<Session[] | null>); }, [apiClient]);
 
   // Charger le doc client + la liste des sessions Firestore
   const refreshSessions = useCallback(async () => {
@@ -80,37 +82,50 @@ function SessionsPageInner() {
 
       // Récupérer les sessions du client depuis Firestore
       const list = await listSessionsForClient(user.uid, clientId);
-      const minimal = (list as Array<{ id: string; is_report_done?: boolean }>).map((d: { id: string; is_report_done?: boolean }) => ({
+      const minimal = (list as Array<{ id: string; is_report_done?: boolean; saved?: boolean }>).map((d) => ({
         id: d.id,
         is_report_done: d.is_report_done ?? false,
+        saved: d.saved ?? false,
       }));
       setFirestoreSessions(minimal);
 
-      // Vérifier l'état réel côté backend (en parallèle) et mettre à jour Firestore si nécessaire
-      const checks = await Promise.all(
-        minimal.map(async (s) => {
-          try {
-            const details = await getSessionRef.current(s.id) as SessionDetails | null;
-            const ready = !!details?.state?.RapportDeSortie;
-            return { id: s.id, ready };
-          } catch {
-            return { id: s.id, ready: !!s.is_report_done };
-          }
-        })
-      );
-
-      const nextStatusMap: Record<string, boolean> = {};
-      for (const chk of checks) {
-        nextStatusMap[chk.id] = chk.ready;
+      // Récupérer la liste des sessions depuis le backend (un seul appel)
+      const backendList = await listSessionsRef.current();
+      const backendById: Record<string, SessionDetails> = {};
+      if (Array.isArray(backendList)) {
+        for (const s of backendList as SessionDetails[]) {
+          backendById[s.id] = s;
+        }
       }
-      setReportReadyById(nextStatusMap);
+      // Vérifier l'état réel côté backend et préparer mises à jour Firestore
+      const checks = minimal.map((s) => {
+        const details = backendById[s.id];
+        const report = (details?.state as unknown as { RapportDeSortie?: unknown })?.RapportDeSortie;
+        const ready = !!report;
+        return { id: s.id, ready, report } as { id: string; ready: boolean; report?: unknown };
+      });
 
-      // Mettre à jour les docs Firestore si un rapport est devenu prêt
-      await Promise.all(
+      // Mettre à jour les docs Firestore si un rapport est devenu prêt (+ ReportKey)
+      await Promise.allSettled(
         checks
           .filter((chk) => chk.ready)
-          .map((chk) => updateClientSessionDoc(user.uid!, clientId, chk.id, { is_report_done: true }))
-      ).catch(() => { /* non bloquant */ });
+          .map((chk) => updateClientSessionDoc(user.uid!, clientId, chk.id, { is_report_done: true, ReportKey: chk.report ?? null }))
+      );
+
+      // Recharger depuis Firestore après mises à jour pour refléter is_report_done/saved au plus juste
+      try {
+        const relist = await listSessionsForClient(user.uid, clientId);
+        const relistMinimal = (relist as Array<{ id: string; is_report_done?: boolean; saved?: boolean }>).
+          map((d) => ({ id: d.id, is_report_done: d.is_report_done ?? false, saved: d.saved ?? false }));
+        setFirestoreSessions(relistMinimal);
+      } catch {}
+
+      const nextStatusMap: Record<string, boolean> = {};
+      for (const s of backendList as SessionDetails[] || []) {
+        const ready = !!(s?.state as unknown as { RapportDeSortie?: unknown })?.RapportDeSortie;
+        nextStatusMap[s.id] = ready;
+      }
+      setReportReadyById(nextStatusMap);
 
       setApiResultTitle('Liste des sessions');
     } finally {
@@ -225,15 +240,53 @@ function SessionsPageInner() {
                             {reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'}
                           </div>
                         </div>
-                        <Button
-                          size="sm"
-                          variant="default"
-                          className="gap-2 h-8 px-3 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white"
-                          onClick={() => handleGoToSession(s.id)}
-                        >
-                          {reportReadyById[s.id] ? <BookOpenSolid /> : <ChevronRightCircleSolid />}
-                          {reportReadyById[s.id] ? 'Lire' : 'Ouvrir'}
-                        </Button>
+                        <div className="flex items-center gap-2">
+                          {reportReadyById[s.id] && !s.saved && (
+                            <Button
+                              size="sm"
+                              variant="default"
+                              aria-label="Enregistrer en mémoire"
+                              className="h-8 w-8 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
+                              onClick={async () => {
+                                if (!user) return;
+                                try {
+                                  await apiClient.ingestSessionMemoryFor(s.id, true);
+                                  await updateClientSessionDoc(user.uid, clientId, s.id, { saved: true });
+                                  // Update UI immediately
+                                  setFirestoreSessions(prev => prev.map(x => x.id === s.id ? { ...x, saved: true } : x));
+                                  void refreshSessions();
+                                } catch {}
+                              }}
+                            >
+                              <BookImageSolid />
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="default"
+                            aria-label={reportReadyById[s.id] ? 'Lire' : 'Ouvrir'}
+                            className="h-8 w-8 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
+                            onClick={() => handleGoToSession(s.id)}
+                          >
+                            {reportReadyById[s.id] ? <BookOpenSolid /> : <ChevronRightCircleSolid />}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            aria-label="Supprimer"
+                            className="h-8 w-8 p-0 rounded-full bg-red-800 hover:bg-red-700 border-red-700 text-white flex items-center justify-center"
+                            onClick={async () => {
+                              if (!user) return;
+                              const ok = window.confirm('Supprimer cette visite ?');
+                              if (!ok) return;
+                              try { await apiClient.deleteSession(s.id); } catch {}
+                              try { await deleteClientSessionDoc(user.uid, clientId, s.id); } catch {}
+                              void refreshSessions();
+                            }}
+                          >
+                            <TrashOneSolid />
+                          </Button>
+                        </div>
                       </div>
                     ))
                   ) : (

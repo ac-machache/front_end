@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
-import { getFirestore, collection, addDoc, getDocs, serverTimestamp, doc, getDoc, setDoc, type Firestore, type DocumentData } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, serverTimestamp, doc, getDoc, setDoc, deleteDoc, type Firestore, type DocumentData } from 'firebase/firestore';
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -122,17 +122,30 @@ export async function listSessionsForClient(userId: string, clientId: string): P
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
 
+export async function getClientSessionDoc(
+  userId: string,
+  clientId: string,
+  sessionId: string
+): Promise<(DocumentData & { id: string }) | null> {
+  const db = getDb();
+  if (!db) return null;
+  const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as DocumentData & { id: string };
+}
+
 // Create/overwrite a session doc with backend sessionId as the Firestore doc id
 export async function setClientSessionDoc(
   userId: string,
   clientId: string,
   sessionId: string,
-  data: { nom_tc: string; nom_agri: string; is_report_done: boolean; ReportKey: string | null }
+  data: { nom_tc: string; nom_agri: string; is_report_done: boolean; ReportKey: string | null; saved?: boolean }
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
   const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
-  const payload = pruneUndefined({ ...data, createdAt: serverTimestamp() });
+  const payload = pruneUndefined({ saved: false, ...data, createdAt: serverTimestamp() });
   await setDoc(ref, payload);
 }
 
@@ -140,12 +153,23 @@ export async function updateClientSessionDoc(
   userId: string,
   clientId: string,
   sessionId: string,
-  data: Partial<{ is_report_done: boolean; ReportKey: string | null }>
+  data: Partial<{ is_report_done: boolean; ReportKey: unknown; saved: boolean }>
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
   const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
   await setDoc(ref, pruneUndefined(data), { merge: true });
+}
+
+export async function deleteClientSessionDoc(
+  userId: string,
+  clientId: string,
+  sessionId: string
+): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
+  await deleteDoc(ref);
 }
 
 

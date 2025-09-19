@@ -57,6 +57,9 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
     createSessionWithId: (sessionId: string, initialState?: Record<string, unknown>) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`, initialState),
     listSessions: () => performRequest('GET', `/apps/${config.appName}/users/${config.userId}/sessions`),
     getSession: (sessionId: string) => performRequest('GET', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`),
+    deleteSession: (sessionId: string) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/delete`),
+    ingestSessionMemoryFor: (sessionId: string, returnContext: boolean = false) =>
+      performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`),
     ingestSessionMemory: async (returnContext: boolean = false) => {
       const path = `/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`;
       const url = `${baseUrl}${path}`;
@@ -214,7 +217,7 @@ export function useAudioProcessor(
   const micStreamRef = useRef<MediaStream | null>(null);
   const micChunkQueue = useRef<Uint8Array[]>([]);
   const micFlushTimer = useRef<number | null>(null);
-  const MIC_FLUSH_MS = 200;
+  const MIC_FLUSH_MS = 50; // Flush mic buffer every 50ms for lower latency
   // Gate to allow pausing the upstream without releasing the mic device
   // Default OFF so UI mic button explicitly enables sending
   const streamingEnabledRef = useRef<boolean>(false);
@@ -637,8 +640,9 @@ export function useSessionReconnection(
     reconnectAttemptsRef.current = 0;
 
     try {
-      await startMic();
+      // Only restore mic automatically if explicitly requested
       if (restoreMicState) {
+        await startMic();
         setStreamingEnabled(true);
       }
       connect();
