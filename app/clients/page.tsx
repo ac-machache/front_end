@@ -7,9 +7,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { addClientForUser, listClientsForUser } from '@/lib/firebase';
 import type { ClientRecord } from '@/lib/types';
-import { Loader2, Plus } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { UserPlusSolid, RefreshAltSolid, ListSolid } from '@mynaui/icons-react';
 
 export default function ClientsPage() {
   const { user, loading } = useAuth();
@@ -67,8 +68,9 @@ export default function ClientsPage() {
     <div className="max-w-4xl mx-auto p-4 space-y-4">
       <div className="flex items-center justify-between gap-3 flex-col sm:flex-row">
         <h1 className="text-xl md:text-2xl font-semibold">Vos clients</h1>
-        <Button variant="secondary" onClick={refresh} disabled={isLoading} className="w-full sm:w-auto">
-          {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />} Actualiser
+        <Button variant="default" onClick={refresh} disabled={isLoading} className="w-full sm:w-auto rounded-full h-10 px-4 gap-2">
+          {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshAltSolid />}
+          Actualiser
         </Button>
       </div>
 
@@ -92,8 +94,9 @@ export default function ClientsPage() {
               <Input id="clientNotes" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} className="mt-1" placeholder="Notes (optionnel)" />
             </div>
             <div className="md:col-span-3">
-              <Button onClick={onAdd} disabled={isAdding || !newName.trim() || !newEmail.trim()} className="w-full sm:w-auto">
-                {isAdding ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />} Ajouter
+              <Button onClick={onAdd} disabled={isAdding || !newName.trim() || !newEmail.trim()} className="w-full sm:w-auto rounded-full h-10 px-4 gap-2">
+                {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlusSolid />}
+                Ajouter
               </Button>
             </div>
           </div>
@@ -111,8 +114,8 @@ export default function ClientsPage() {
               <div className="text-sm text-muted-foreground whitespace-pre-wrap">{c.notes || '—'}</div>
             </CardContent>
             <CardFooter>
-              <Button asChild size="sm">
-                <Link href={`/session?clientId=${c.id}`}>Voir les visites</Link>
+              <Button asChild size="sm" className="rounded-full h-9 px-3 gap-2">
+                <Link href={`/session?clientId=${c.id}`}><ListSolid /> Voir les visites</Link>
               </Button>
             </CardFooter>
           </Card>

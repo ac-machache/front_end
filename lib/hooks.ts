@@ -1,7 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Config, LogLevel, WsStatus } from './types';
-import { LogLevel as LogLevelEnum, WsStatus as WsStatusEnum } from './types';
+import type { Config, WsStatus } from './types';
+import { LogLevel as LogLevelEnum, WsStatus as WsStatusEnum, LogLevel } from './types';
 import { buildHttpUrl, arrayBufferToBase64, base64ToUint8Array } from './utils';
 // Use the same JS modules as the original app, served from /public/js
 // These are standard ES modules under /public, import via absolute path at runtime
@@ -96,6 +96,15 @@ export function useWebSocket(
   onError: (event: Event) => void,
 ) {
   const ws = useRef<WebSocket | null>(null);
+  // Keep latest handler references to avoid stale closures
+  const onOpenRef = useRef(onOpen);
+  const onMessageRef = useRef(onMessage);
+  const onCloseRef = useRef(onClose);
+  const onErrorRef = useRef(onError);
+  useEffect(() => { onOpenRef.current = onOpen; }, [onOpen]);
+  useEffect(() => { onMessageRef.current = onMessage; }, [onMessage]);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
+  useEffect(() => { onErrorRef.current = onError; }, [onError]);
   const isManuallyClosingRef = useRef(false);
   const hasConnectedSuccessfullyRef = useRef(false); // New ref to track connection success
   const [status, setStatus] = useState<WsStatus>(WsStatusEnum.Disconnected);
@@ -103,9 +112,18 @@ export function useWebSocket(
   const connect = useCallback((resumeConnection = false) => {
     if (ws.current) {
       const state = ws.current.readyState;
-      if (state === WebSocket.OPEN || state === WebSocket.CONNECTING || state === WebSocket.CLOSING) {
-        return;
+      if (state === WebSocket.OPEN) {
+        return; // already connected
       }
+      // If CONNECTING or CLOSING, aggressively replace the socket to avoid UI deadlocks
+      try {
+        ws.current.onopen = null as unknown as () => void;
+        ws.current.onmessage = null as unknown as (e: MessageEvent) => void;
+        ws.current.onerror = null as unknown as (e: Event) => void;
+        ws.current.onclose = null as unknown as (e: CloseEvent) => void;
+        ws.current.close();
+      } catch {}
+      ws.current = null;
     }
     setStatus(WsStatusEnum.Connecting);
     isManuallyClosingRef.current = false;
@@ -119,18 +137,18 @@ export function useWebSocket(
       ws.current = socket; 
       setStatus(WsStatusEnum.Connected);
       hasConnectedSuccessfullyRef.current = true; // Mark that we've had a successful connection
-      onOpen(); 
+      try { onOpenRef.current(); } catch {}
     };
     
     socket.onmessage = async (event) => {
       try {
         if (typeof event.data === 'string') {
-          onMessage(JSON.parse(event.data));
+          onMessageRef.current(JSON.parse(event.data));
         } else if (event.data instanceof ArrayBuffer) {
-          onMessage({ mime_type: 'audio/pcm', data: arrayBufferToBase64(event.data) });
+          onMessageRef.current({ mime_type: 'audio/pcm', data: arrayBufferToBase64(event.data) });
         } else if (event.data instanceof Blob) {
           const buf = await event.data.arrayBuffer();
-          onMessage({ mime_type: 'audio/pcm', data: arrayBufferToBase64(buf) });
+          onMessageRef.current({ mime_type: 'audio/pcm', data: arrayBufferToBase64(buf) });
         }
       } catch {}
     };
@@ -138,14 +156,14 @@ export function useWebSocket(
     socket.onclose = (event) => {
       setStatus(WsStatusEnum.Disconnected);
       const wasManual = isManuallyClosingRef.current;
-      onClose(event.code, event.reason, wasManual);
+      try { onCloseRef.current(event.code, event.reason, wasManual); } catch {}
       if (ws.current === socket) {
         ws.current = null;
       }
       isManuallyClosingRef.current = false;
     };
     
-    socket.onerror = (event) => { setStatus(WsStatusEnum.Error); onError(event); };
+    socket.onerror = (event) => { setStatus(WsStatusEnum.Error); try { onErrorRef.current(event); } catch {} };
     ws.current = socket;
   }, [url, onOpen, onMessage, onClose, onError]);
   
@@ -163,7 +181,9 @@ export function useWebSocket(
         ws.current.onmessage = null;
         ws.current.onerror = null;
       } catch {}
-      ws.current.close(1000, 'User disconnected');
+      try { ws.current.close(1000, 'User disconnected'); } catch {}
+      // Allow immediate reconnect without waiting for onclose
+      ws.current = null;
     }
   }, []);
   
@@ -200,8 +220,7 @@ export function useAudioProcessor(
   const streamingEnabledRef = useRef<boolean>(false);
   const setStreamingEnabled = useCallback((enabled: boolean) => { 
     streamingEnabledRef.current = enabled;
-    addLog(LogLevelEnum.Audio, `Streaming ${enabled ? 'enabled' : 'disabled'}`, { enabled });
-  }, [addLog]);
+  }, []);
 
   const startMic = useCallback(async () => {
     try {
@@ -264,8 +283,6 @@ export function useAudioProcessor(
           
           if (streamingEnabledRef.current) {
             onMicData(arrayBufferToBase64(combined.buffer), 'audio/pcm');
-          } else {
-            addLog(LogLevelEnum.Audio, 'Audio data captured but streaming disabled');
           }
         }, MIC_FLUSH_MS);
       }
@@ -289,7 +306,7 @@ export function useAudioProcessor(
   }, []);
 
   const playAudioChunk = useCallback((base64Data: string) => {
-    if (!audioPlayerNode.current) { addLog(LogLevelEnum.Error, 'Audio player not initialized'); return; }
+    if (!audioPlayerNode.current) { return; }
     const pcmBytes = base64ToUint8Array(base64Data);
     audioPlayerNode.current.port.postMessage(pcmBytes.buffer);
   }, [addLog]);
@@ -768,5 +785,100 @@ export function useSessionMode(
     setDisconnected,
     cleanup
   };
+}
+
+export function useVisibilityGuard(
+  addLog: (level: LogLevel, message: string, data?: unknown) => void,
+  options: {
+    pause: () => Promise<void> | void;
+    restore: () => Promise<void> | void;
+    disconnect: () => Promise<void> | void;
+    graceMs?: number;
+  }
+) {
+  const hiddenTimerRef = React.useRef<number | null>(null);
+  const isHiddenRef = React.useRef<boolean>(false);
+
+  React.useEffect(() => {
+    const GRACE_MS = options.graceMs ?? 12000;
+
+    const pause = async () => { try { await options.pause(); } catch {} };
+    const restore = async () => { try { await options.restore(); } catch {} };
+    const disconnect = async () => { try { await options.disconnect(); } catch {} };
+
+    const onHidden = () => {
+      isHiddenRef.current = true;
+      void pause();
+      if (hiddenTimerRef.current) { try { window.clearTimeout(hiddenTimerRef.current); } catch {} }
+      hiddenTimerRef.current = window.setTimeout(() => {
+        if (isHiddenRef.current) void disconnect();
+      }, GRACE_MS);
+    };
+    const onVisible = () => {
+      isHiddenRef.current = false;
+      if (hiddenTimerRef.current) { try { window.clearTimeout(hiddenTimerRef.current); } catch {} hiddenTimerRef.current = null; }
+      void restore();
+    };
+
+    const visHandler = () => (document.visibilityState === 'hidden' ? onHidden() : onVisible());
+
+    try { document.addEventListener('visibilitychange', visHandler); } catch {}
+    try { window.addEventListener('pagehide', onHidden); } catch {}
+    try { (window as unknown as { addEventListener?: (t: string, cb: () => void) => void }).addEventListener?.('freeze', onHidden); } catch {}
+
+    return () => {
+      try { document.removeEventListener('visibilitychange', visHandler); } catch {}
+      try { window.removeEventListener('pagehide', onHidden); } catch {}
+      try { (window as unknown as { removeEventListener?: (t: string, cb: () => void) => void }).removeEventListener?.('freeze', onHidden); } catch {}
+      if (hiddenTimerRef.current) { try { window.clearTimeout(hiddenTimerRef.current); } catch {} hiddenTimerRef.current = null; }
+    };
+  }, [addLog, options]);
+}
+
+export function useWakeLock(
+  addLog: (level: LogLevel, message: string, data?: unknown) => void,
+  shouldLock: boolean
+) {
+  const wakeLockRef = React.useRef<unknown | null>(null);
+
+  React.useEffect(() => {
+    const hasWakeLock = typeof (navigator as unknown as { wakeLock?: unknown }).wakeLock !== 'undefined';
+    if (!hasWakeLock) { addLog(LogLevel.Ws, 'Wake Lock API not supported'); return; }
+    let cancelled = false;
+
+    const apply = async () => {
+      try {
+        if (shouldLock && !wakeLockRef.current) {
+          const sentinel = await (navigator as unknown as { wakeLock: { request: (t: 'screen') => Promise<unknown> } }).wakeLock.request('screen');
+          if (cancelled) { try { (sentinel as { release?: () => Promise<void> }).release?.(); } catch {} return; }
+          wakeLockRef.current = sentinel;
+          addLog(LogLevel.Ws, 'Wake Lock acquired');
+          try {
+            (sentinel as { addEventListener?: (t: string, cb: () => void) => void }).addEventListener?.('release', () => {
+              addLog(LogLevel.Ws, 'Wake Lock released');
+              wakeLockRef.current = null;
+            });
+          } catch {}
+        }
+        if (!shouldLock && wakeLockRef.current) {
+          try { await (wakeLockRef.current as { release?: () => Promise<void> }).release?.(); } catch {}
+          wakeLockRef.current = null;
+          addLog(LogLevel.Ws, 'Wake Lock released (conditions changed)');
+        }
+      } catch (e) {
+        addLog(LogLevel.Error, 'Wake Lock error', e);
+        wakeLockRef.current = null;
+      }
+    };
+
+    void apply();
+    const onVisible = () => { if (document.visibilityState === 'visible') void apply(); };
+    try { document.addEventListener('visibilitychange', onVisible); } catch {}
+    return () => {
+      cancelled = true;
+      try { document.removeEventListener('visibilitychange', onVisible); } catch {}
+      if (wakeLockRef.current) { try { (wakeLockRef.current as { release?: () => Promise<void> }).release?.(); } catch {} wakeLockRef.current = null; }
+    };
+  }, [addLog, shouldLock]);
 }
 

@@ -43,6 +43,13 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 
+@keyframes pulse {
+  50% {
+    transform: scaleY(0.5);
+    opacity: 0.75;
+  }
+}
+
 :root {
   --radius: 0.625rem;
   --background: oklch(1 0 0);

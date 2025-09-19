@@ -5,6 +5,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import Link from 'next/link';
 import Image from 'next/image';
 import { Moon, Sun } from 'lucide-react';
+import { LogoutSolid } from '@mynaui/icons-react';
 
 export default function AppNavbar() {
   const { user, signOut, loading } = useAuth();
@@ -57,7 +58,10 @@ export default function AppNavbar() {
                   {(user.displayName || user.email || 'U').slice(0, 1).toUpperCase()}
                 </div>
               )}
-              <Button variant="secondary" size="sm" onClick={signOut}>Se déconnecter</Button>
+              <Button onClick={signOut} className="h-8 px-3 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white">
+                <LogoutSolid />
+                Se déconnecter
+              </Button>
             </div>
           )}
         </div>
