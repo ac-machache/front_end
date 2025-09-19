@@ -3,7 +3,7 @@ import React, { useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import type { Session, SessionDetails } from '@/lib/types';
+import type { Session, SessionDetails, SessionState } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
 import { useApiClient } from '@/lib/hooks';
 import { Loader2 } from 'lucide-react';
@@ -35,6 +35,7 @@ function SessionsPageInner() {
   // Liste des sessions: maintenant stockée dans Firestore (sessions du client)
   const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; is_report_done?: boolean; saved?: boolean }>>([]);
   const [reportReadyById, setReportReadyById] = React.useState<Record<string, boolean>>({});
+  const [displayLabelsById, setDisplayLabelsById] = React.useState<Record<string, { title: string; subtitle?: string }>>({});
 
   // Client (pour nom_agri)
   const [clientDoc, setClientDoc] = React.useState<ClientDoc | null>(null);
@@ -121,11 +122,33 @@ function SessionsPageInner() {
       } catch {}
 
       const nextStatusMap: Record<string, boolean> = {};
+      const nextLabelsMap: Record<string, { title: string; subtitle?: string }> = {};
       for (const s of backendList as SessionDetails[] || []) {
-        const ready = !!(s?.state as unknown as { RapportDeSortie?: unknown })?.RapportDeSortie;
+        const state = (s?.state as SessionState | undefined);
+        const main = state?.RapportDeSortie?.main_report;
+        const title = (typeof main?.title === 'string' && main.title.trim() !== '')
+          ? main.title
+          : (typeof main?.farmer === 'string' && main.farmer.trim() !== '')
+            ? main.farmer
+            : (typeof state?.nom_agri === 'string' && state.nom_agri.trim() !== '')
+              ? state.nom_agri
+              : (clientDoc?.name || s.id);
+        const dateRaw = (typeof main?.date_of_visit === 'string' && main.date_of_visit.trim() !== '')
+          ? main.date_of_visit
+          : (typeof s?.lastUpdateTime === 'string' ? s.lastUpdateTime : undefined);
+        let dateFormatted: string | undefined;
+        try { dateFormatted = dateRaw ? new Date(dateRaw).toLocaleString() : undefined; } catch {}
+        const subtitleParts: string[] = [];
+        if (dateFormatted) subtitleParts.push(dateFormatted);
+        if (typeof state?.nom_tc === 'string' && state.nom_tc.trim() !== '') subtitleParts.push(state.nom_tc);
+        const subtitle = subtitleParts.join(' · ');
+        nextLabelsMap[s.id] = { title, subtitle: subtitle || undefined };
+
+        const ready = !!state?.RapportDeSortie;
         nextStatusMap[s.id] = ready;
       }
       setReportReadyById(nextStatusMap);
+      setDisplayLabelsById(nextLabelsMap);
 
       setApiResultTitle('Liste des sessions');
     } finally {
@@ -233,21 +256,32 @@ function SessionsPageInner() {
                 <div className="space-y-2">
                   {Array.isArray(firestoreSessions) && firestoreSessions.length > 0 ? (
                     firestoreSessions.map((s) => (
-                      <div key={s.id} className="flex items-center justify-between rounded-md border px-3 py-2 gap-3">
+                      <div
+                        key={s.id}
+                        className="flex items-center justify-between rounded-md border px-3 py-3 gap-3 md:gap-2 min-h-14 md:min-h-12 cursor-pointer hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none select-none"
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => handleGoToSession(s.id)}
+                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleGoToSession(s.id); } }}
+                        aria-label={`Ouvrir la session ${s.id}`}
+                      >
                         <div className="min-w-0">
-                          <div className="text-sm font-medium truncate">{s.id}</div>
+                          <div className="text-sm font-medium truncate">{displayLabelsById[s.id]?.title || clientDoc?.name || s.id}</div>
                           <div className="text-xs text-muted-foreground truncate">
-                            {reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'}
+                            {displayLabelsById[s.id]?.subtitle ? `${displayLabelsById[s.id]?.subtitle} • ` : ''}
+                            {reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'}{s.saved ? ' • Sauvegardée' : ''}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-3 md:gap-2" role="group" aria-label="Actions de session">
                           {reportReadyById[s.id] && !s.saved && (
                             <Button
-                              size="sm"
+                              size="icon"
                               variant="default"
                               aria-label="Enregistrer en mémoire"
-                              className="h-8 w-8 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
-                              onClick={async () => {
+                              title="Enregistrer en mémoire"
+                              className="size-11 md:size-9 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
+                              onClick={async (e) => {
+                                e.stopPropagation();
                                 if (!user) return;
                                 try {
                                   await apiClient.ingestSessionMemoryFor(s.id, true);
@@ -258,24 +292,27 @@ function SessionsPageInner() {
                                 } catch {}
                               }}
                             >
-                              <BookImageSolid />
+                              <BookImageSolid className="size-5 md:size-4" />
                             </Button>
                           )}
                           <Button
-                            size="sm"
+                            size="icon"
                             variant="default"
                             aria-label={reportReadyById[s.id] ? 'Lire' : 'Ouvrir'}
-                            className="h-8 w-8 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
-                            onClick={() => handleGoToSession(s.id)}
+                            title={reportReadyById[s.id] ? 'Lire le rapport' : 'Ouvrir la session'}
+                            className="size-11 md:size-9 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
+                            onClick={(e) => { e.stopPropagation(); handleGoToSession(s.id); }}
                           >
-                            {reportReadyById[s.id] ? <BookOpenSolid /> : <ChevronRightCircleSolid />}
+                            {reportReadyById[s.id] ? <BookOpenSolid className="size-5 md:size-4" /> : <ChevronRightCircleSolid className="size-5 md:size-4" />}
                           </Button>
                           <Button
-                            size="sm"
+                            size="icon"
                             variant="destructive"
                             aria-label="Supprimer"
-                            className="h-8 w-8 p-0 rounded-full bg-red-800 hover:bg-red-700 border-red-700 text-white flex items-center justify-center"
-                            onClick={async () => {
+                            title="Supprimer"
+                            className="size-11 md:size-9 p-0 rounded-full bg-red-800 hover:bg-red-700 border-red-700 text-white flex items-center justify-center"
+                            onClick={async (e) => {
+                              e.stopPropagation();
                               if (!user) return;
                               const ok = window.confirm('Supprimer cette visite ?');
                               if (!ok) return;
@@ -284,7 +321,7 @@ function SessionsPageInner() {
                               void refreshSessions();
                             }}
                           >
-                            <TrashOneSolid />
+                            <TrashOneSolid className="size-5 md:size-4" />
                           </Button>
                         </div>
                       </div>

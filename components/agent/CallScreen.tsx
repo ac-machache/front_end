@@ -48,8 +48,8 @@ export default function CallScreen(props: CallScreenProps) {
 
         {/* Bottom control bar */}
         <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-50 px-3 pt-2 pb-3 md:px-12 md:pb-12">
-          <div className="mx-auto w-full max-w-2xl">
-            <div className="pointer-events-auto rounded-[31px] border border-white/15 bg-zinc-900/80 p-3 backdrop-blur-md">
+          <div className="mx-auto w-full flex justify-center">
+            <div className="pointer-events-auto mx-auto inline-flex items-center justify-center rounded-[31px] border border-white/15 bg-zinc-900/80 p-3 md:p-3.5 backdrop-blur-md">
               <ControlBarLite
                 isConnected={inCall}
                 isConnecting={isConnecting}
