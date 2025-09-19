@@ -516,243 +516,239 @@ export default function SessionDetail() {
             <CardContent>
               {reportLoading && <div className="text-sm text-muted-foreground">Chargement…</div>}
               {!reportLoading && reportDetails?.state?.RapportDeSortie && (
-                <Accordion
-                  className="space-y-3"
-                  transition={{ duration: 0.25, ease: 'easeInOut' }}
-                  variants={{ expanded: { opacity: 1, height: 'auto', y: 0 }, collapsed: { opacity: 0, height: 0, y: -8 } }}
-                  expandedValue={expandedReportSection}
-                  onValueChange={setExpandedReportSection}
-                >
-                  <AccordionItem value="main_report" className="rounded-md border">
-                    <AccordionTrigger className="w-full text-left text-lg font-semibold px-4 py-3">Rapport principal</AccordionTrigger>
-                    <AccordionContent className="px-4 pb-4 pt-3 border-t">
-                      <div className="space-y-2 text-sm">
-                        <div><span className="font-medium">Titre :</span> {reportDetails.state.RapportDeSortie.main_report?.title}</div>
-                        <div><span className="font-medium">Date :</span> {reportDetails.state.RapportDeSortie.main_report?.date_of_visit}</div>
-                        <div><span className="font-medium">Agriculteur :</span> {reportDetails.state.RapportDeSortie.main_report?.farmer}</div>
-                        <div><span className="font-medium">TC :</span> {reportDetails.state.RapportDeSortie.main_report?.tc}</div>
-                        <div className="whitespace-pre-wrap"><span className="font-medium">Résumé :</span> {reportDetails.state.RapportDeSortie.main_report?.report_summary}</div>
-                      </div>
-                    </AccordionContent>
-                  </AccordionItem>
+                <div className="space-y-6 text-sm leading-relaxed">
+                  {(() => {
+                    const rpt = reportDetails.state.RapportDeSortie;
+                    const main = rpt.main_report;
+                    const sd = rpt.strategic_dashboard;
+                    return (
+                      <>
+                        <section className="space-y-3">
+                          <h3 className="text-lg font-semibold">Rapport principal</h3>
+                          <div className="rounded-lg border p-4">
+                            <dl className="grid grid-cols-1 md:grid-cols-[180px_1fr] gap-x-6 gap-y-3 items-start">
+                              {(typeof main?.title === 'string' && main.title.trim() !== '') && (
+                                <>
+                                  <dt className="text-xs md:text-[13px] uppercase tracking-wide text-muted-foreground">Titre</dt>
+                                  <dd className="text-sm font-medium">{main.title}</dd>
+                                </>
+                              )}
+                              {(typeof main?.date_of_visit === 'string' && main.date_of_visit.trim() !== '') && (
+                                <>
+                                  <dt className="text-xs md:text-[13px] uppercase tracking-wide text-muted-foreground">Date</dt>
+                                  <dd className="text-sm">{main.date_of_visit}</dd>
+                                </>
+                              )}
+                              {(typeof main?.farmer === 'string' && main.farmer.trim() !== '') && (
+                                <>
+                                  <dt className="text-xs md:text-[13px] uppercase tracking-wide text-muted-foreground">Agriculteur</dt>
+                                  <dd className="text-sm">{main.farmer}</dd>
+                                </>
+                              )}
+                              {(typeof main?.tc === 'string' && main.tc.trim() !== '') && (
+                                <>
+                                  <dt className="text-xs md:text-[13px] uppercase tracking-wide text-muted-foreground">TC</dt>
+                                  <dd className="text-sm">{main.tc}</dd>
+                                </>
+                              )}
+                            </dl>
+                            {(typeof main?.report_summary === 'string' && main.report_summary.trim() !== '') && (
+                              <div className="mt-4 pt-4 border-t">
+                                <div className="text-sm font-medium mb-1">Résumé</div>
+                                <p className="whitespace-pre-wrap text-sm leading-relaxed">{main.report_summary}</p>
+                              </div>
+                            )}
+                          </div>
+                        </section>
 
-                  {reportDetails.state.RapportDeSortie.strategic_dashboard && (
-                    <AccordionItem value="strategic_dashboard" className="rounded-md border">
-                      <AccordionTrigger className="w-full text-left text-lg font-semibold px-4 py-3">Tableau de bord stratégique</AccordionTrigger>
-                      <AccordionContent className="px-4 pb-4 pt-3 border-t">
-                        <Accordion
-                          className="space-y-3"
-                          transition={{ duration: 0.2, ease: 'easeInOut' }}
-                          variants={{ expanded: { opacity: 1, height: 'auto', y: 0 }, collapsed: { opacity: 0, height: 0, y: -6 } }}
-                          expandedValue={expandedStrategicSection}
-                          onValueChange={setExpandedStrategicSection}
-                        >
-                          {reportDetails.state.RapportDeSortie.strategic_dashboard.proactive_insights && (
-                            <AccordionItem value="proactive_insights" className="rounded border">
-                              <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Synthèse proactive</AccordionTrigger>
-                              <AccordionContent className="px-3 pb-3 pt-3 border-t">
-                                <div className="space-y-4 text-sm">
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.length ?? 0) > 0) && (
+                        {sd && (
+                          <>
+                            <h3 className="text-lg font-semibold">Tableau de bord stratégique</h3>
+                            <div className="space-y-4">
+                              {sd.proactive_insights && (
+                                <section className="space-y-2 rounded-lg border p-4">
+                                  <h4 className="font-semibold">Synthèse proactive</h4>
+                                  {((sd.proactive_insights.identified_issues?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
                                       <div className="text-sm font-medium">Points identifiés</div>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.proactive_insights.identified_issues?.map((i: string, idx: number) => (
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.proactive_insights.identified_issues?.map((i: string, idx: number) => (
                                           <li key={`pi-ii-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.length ?? 0) > 0) && (
+                                  {((sd.proactive_insights.proposed_solutions?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
                                       <div className="text-sm font-medium">Pistes/solutions</div>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.proactive_insights.proposed_solutions?.map((i: string, idx: number) => (
                                           <li key={`pi-ps-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                </div>
-                              </AccordionContent>
-                            </AccordionItem>
-                          )}
+                                </section>
+                              )}
 
-                          {reportDetails.state.RapportDeSortie.strategic_dashboard.action_plan && (
-                            <AccordionItem value="action_plan" className="rounded border">
-                              <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Plan d’action</AccordionTrigger>
-                              <AccordionContent className="px-3 pb-3 pt-3 border-t">
-                                <div className="space-y-4 text-sm">
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.length ?? 0) > 0) && (
+                              {sd.action_plan && (
+                                <section className="space-y-2 rounded-lg border p-4">
+                                  <h4 className="font-semibold">Plan d’action</h4>
+                                  {((sd.action_plan.for_tc?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Plan d’action – TC</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.action_plan.for_tc?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Plan d’action – TC</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.action_plan.for_tc?.map((i: string, idx: number) => (
                                           <li key={`ap-tc-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.length ?? 0) > 0) && (
+                                  {((sd.action_plan.for_farmer?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Plan d’action – Agriculteur</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.action_plan.for_farmer?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Plan d’action – Agriculteur</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.action_plan.for_farmer?.map((i: string, idx: number) => (
                                           <li key={`ap-farmer-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                </div>
-                              </AccordionContent>
-                            </AccordionItem>
-                          )}
+                                </section>
+                              )}
 
-                          {reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector && (
-                            <AccordionItem value="opportunity_detector" className="rounded border">
-                              <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Détecteur d’opportunités</AccordionTrigger>
-                              <AccordionContent className="px-3 pb-3 pt-3 border-t">
-                                <div className="space-y-4 text-sm">
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.length ?? 0) > 0) && (
+                              {sd.opportunity_detector && (
+                                <section className="space-y-2 rounded-lg border p-4">
+                                  <h4 className="font-semibold">Détecteur d’opportunités</h4>
+                                  {((sd.opportunity_detector.sales?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Opportunités (ventes)</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector.sales?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Opportunités (ventes)</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.opportunity_detector.sales?.map((i: string, idx: number) => (
                                           <li key={`od-sales-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.length ?? 0) > 0) && (
+                                  {((sd.opportunity_detector.advice?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Conseils</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector.advice?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Conseils</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.opportunity_detector.advice?.map((i: string, idx: number) => (
                                           <li key={`od-adv-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.length ?? 0) > 0) && (
+                                  {((sd.opportunity_detector.farmer_projects?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Projets agriculteur</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Projets agriculteur</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.opportunity_detector.farmer_projects?.map((i: string, idx: number) => (
                                           <li key={`od-fp-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                </div>
-                              </AccordionContent>
-                            </AccordionItem>
-                          )}
+                                </section>
+                              )}
 
-                          {reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis && (
-                            <AccordionItem value="risk_analysis" className="rounded border">
-                              <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Analyse des risques</AccordionTrigger>
-                              <AccordionContent className="px-3 pb-3 pt-3 border-t">
-                                <div className="space-y-4 text-sm">
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.length ?? 0) > 0) && (
+                              {sd.risk_analysis && (
+                                <section className="space-y-2 rounded-lg border p-4">
+                                  <h4 className="font-semibold">Analyse des risques</h4>
+                                  {((sd.risk_analysis.commercial?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Risque commercial</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis.commercial?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Risque commercial</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.risk_analysis.commercial?.map((i: string, idx: number) => (
                                           <li key={`risk-com-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.length ?? 0) > 0) && (
+                                  {((sd.risk_analysis.technical?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Risque technique</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis.technical?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Risque technique</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.risk_analysis.technical?.map((i: string, idx: number) => (
                                           <li key={`risk-tech-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.length ?? 0) > 0) && (
+                                  {((sd.risk_analysis.weak_signals?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Signaux faibles</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.risk_analysis.weak_signals?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Signaux faibles</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.risk_analysis.weak_signals?.map((i: string, idx: number) => (
                                           <li key={`risk-ws-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                </div>
-                              </AccordionContent>
-                            </AccordionItem>
-                          )}
+                                </section>
+                              )}
 
-                          {reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer && (
-                            <AccordionItem value="relationship_barometer" className="rounded border">
-                              <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Baromètre de la relation</AccordionTrigger>
-                              <AccordionContent className="px-3 pb-3 pt-3 border-t">
-                                <div className="space-y-4 text-sm">
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.length ?? 0) > 0) && (
+                              {sd.relationship_barometer && (
+                                <section className="space-y-2 rounded-lg border p-4">
+                                  <h4 className="font-semibold">Baromètre de la relation</h4>
+                                  {((sd.relationship_barometer.satisfaction_points?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Points de satisfaction</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Points de satisfaction</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.relationship_barometer.satisfaction_points?.map((i: string, idx: number) => (
                                           <li key={`rel-sat-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.length ?? 0) > 0) && (
+                                  {((sd.relationship_barometer.frustration_points?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Points de frustration</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Points de frustration</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.relationship_barometer.frustration_points?.map((i: string, idx: number) => (
                                           <li key={`rel-frus-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                  {((reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.length ?? 0) > 0) && (
+                                  {((sd.relationship_barometer.personal_notes?.length ?? 0) > 0) && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Notes personnelles</h4>
-                                      <ul className="list-disc pl-5 space-y-1">
-                                        {reportDetails.state.RapportDeSortie.strategic_dashboard.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
+                                      <div className="text-sm font-medium">Notes personnelles</div>
+                                      <ul className="list-disc pl-5 md:pl-6 space-y-1">
+                                        {sd.relationship_barometer.personal_notes?.map((i: string, idx: number) => (
                                           <li key={`rel-notes-${idx}`}>{i}</li>
                                         ))}
                                       </ul>
                                     </div>
                                   )}
-                                </div>
-                              </AccordionContent>
-                            </AccordionItem>
-                          )}
+                                </section>
+                              )}
 
-                          {reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep && (
-                            <AccordionItem value="next_contact_prep" className="rounded border">
-                              <AccordionTrigger className="w-full text-left font-medium px-3 py-2">Préparation du prochain contact</AccordionTrigger>
-                              <AccordionContent className="px-3 pb-3 pt-3 border-t">
-                                <div className="space-y-4 text-sm">
-                                  {(typeof reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic === 'string' && reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic.trim() !== '') && (
+                              {sd.next_contact_prep && (
+                                <section className="space-y-2 rounded-lg border p-4">
+                                  <h4 className="font-semibold">Préparation du prochain contact</h4>
+                                  {(typeof sd.next_contact_prep.opening_topic === 'string' && sd.next_contact_prep.opening_topic.trim() !== '') && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Sujet d’ouverture</h4>
-                                      <p className="text-sm whitespace-pre-wrap">{reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep.opening_topic}</p>
+                                      <div className="text-sm font-medium">Sujet d’ouverture</div>
+                                      <p className="text-sm whitespace-pre-wrap">{sd.next_contact_prep.opening_topic}</p>
                                     </div>
                                   )}
-                                  {(typeof reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective === 'string' && reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective.trim() !== '') && (
+                                  {(typeof sd.next_contact_prep.next_visit_objective === 'string' && sd.next_contact_prep.next_visit_objective.trim() !== '') && (
                                     <div className="space-y-1">
-                                      <h4 className="font-medium">Objectif de la prochaine visite</h4>
-                                      <p className="text-sm whitespace-pre-wrap">{reportDetails.state.RapportDeSortie.strategic_dashboard.next_contact_prep.next_visit_objective}</p>
+                                      <div className="text-sm font-medium">Objectif de la prochaine visite</div>
+                                      <p className="text-sm whitespace-pre-wrap">{sd.next_contact_prep.next_visit_objective}</p>
                                     </div>
                                   )}
-                                </div>
-                              </AccordionContent>
-                            </AccordionItem>
-                          )}
-                        </Accordion>
-                      </AccordionContent>
-                    </AccordionItem>
-                  )}
-                </Accordion>
+                                </section>
+                              )}
+                            </div>
+                          </>
+                        )}
+                      </>
+                    );
+                  })()}
+                </div>
               )}
             </CardContent>
           </Card>
