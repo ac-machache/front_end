@@ -105,7 +105,7 @@ export default function ClientsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         {clients.map((c) => (
-          <Card key={c.id}>
+          <Card key={c.id} data-testid={`client-card-${c.id}`}>
             <CardHeader>
               <CardTitle>{c.name}</CardTitle>
               <CardDescription>{c.email}</CardDescription>

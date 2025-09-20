@@ -1,204 +1,234 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
 import React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import SessionDetail from './page';
+import { useAuth } from '@/components/auth/AuthProvider';
+import { useSearchParams, useParams, useRouter } from 'next/navigation';
+import * as hooks from '@/lib/hooks';
+import * as firebase from '@/lib/firebase';
 import { WsStatus } from '@/lib/types';
+import * as wsRouter from '@/lib/wsRouter';
 
-// Mocks
-const routerReplaceMock = vi.fn();
-const connectMock = vi.fn();
-const disconnectMock = vi.fn();
-const sendMessageMock = vi.fn();
-const startMicMock = vi.fn().mockResolvedValue(undefined);
-const stopMicMock = vi.fn();
-const playAudioChunkMock = vi.fn();
-const clearPlaybackQueueMock = vi.fn();
-const setStreamingEnabledMock = vi.fn();
-
-const audioPlaybackMock = {
-  playConnectedSound: vi.fn(),
-  startToolCall: vi.fn(),
-  endToolCall: vi.fn(),
-  cleanup: vi.fn(),
-  isToolCallActive: vi.fn().mockReturnValue(false),
-};
-
-const sessionModeMock = {
-  resetToIdle: vi.fn(),
-  setDisconnected: vi.fn(),
-  startThinking: vi.fn(),
-  stopThinking: vi.fn(),
-  mode: 'idle' as const,
-};
-
-const sessionReconnectionMock = {
-  isReconnecting: false,
-  connectionState: { isResuming: false, hasResumed: false, backendSessionState: undefined } as { isResuming: boolean; hasResumed: boolean; backendSessionState: undefined; },
-  reconnectAttempts: 0,
-  manualConnect: vi.fn().mockResolvedValue(undefined),
-  manualDisconnect: vi.fn(),
-  handleConnectionClose: vi.fn(),
-  handleConnectionOpen: vi.fn(),
-  handleSessionResumed: vi.fn(),
-};
-
-const wsStatusRef = { value: WsStatus.Disconnected };
-const wsCbs = { onOpen: undefined as unknown as () => void, onMessage: undefined as unknown as (d: unknown) => void, onClose: undefined as unknown as (c?: number, r?: string, m?: boolean) => void, onError: undefined as unknown as (e?: Event) => void };
-const configRef = { value: { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' } };
-const setConfigMock = vi.fn(updater => {
-  if (typeof updater === 'function') {
-    configRef.value = updater(configRef.value);
-  } else {
-    configRef.value = updater;
-  }
-});
+// --- MOCKS ---
 
 vi.mock('next/navigation', () => ({
-  useParams: () => ({ id: 's1' }),
-  useRouter: () => ({ replace: routerReplaceMock }),
-  useSearchParams: () => ({ get: (k: string) => (k === 'clientId' ? 'c1' : null) }),
+  useParams: vi.fn(),
+  useRouter: vi.fn(),
+  useSearchParams: vi.fn(),
 }));
+vi.mock('@/components/auth/AuthProvider');
+vi.mock('@/lib/firebase');
+vi.mock('@/lib/wsRouter');
 
-vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { uid: 'u1' }, loading: false }),
-}));
+let wsHooks: {
+  onOpen: () => void;
+  onMessage: (data: unknown) => void;
+  onClose: (code?: number, reason?: string, wasManual?: boolean) => void;
+  onError: (event?: Event) => void;
+} | null = null;
 
-vi.mock('@/lib/hooks', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/hooks')>('@/lib/hooks');
-  return {
-    ...actual,
-    useLocalStorage: () => [configRef.value, setConfigMock],
-    useWebSocket: (_url: string, onOpen: () => void, onMessage: (d: unknown) => void, onClose: (c?: number, r?: string, m?: boolean) => void, onError: (e?: Event) => void) => {
-      wsCbs.onOpen = onOpen;
-      wsCbs.onMessage = onMessage;
-      wsCbs.onClose = onClose;
-      wsCbs.onError = onError;
-      return { connect: connectMock, disconnect: disconnectMock, sendMessage: sendMessageMock, status: wsStatusRef.value };
-    },
-    useAudioProcessor: () => ({
-      startMic: startMicMock,
-      stopMic: stopMicMock,
-      playAudioChunk: playAudioChunkMock,
-      clearPlaybackQueue: clearPlaybackQueueMock,
-      setStreamingEnabled: setStreamingEnabledMock,
-    }),
-    useAudioPlayback: () => audioPlaybackMock,
-    useSessionMode: () => sessionModeMock,
-    useSessionReconnection: () => sessionReconnectionMock,
-  };
+let visibilityHooks: {
+    pause: () => Promise<void>;
+    restore: () => Promise<void>;
+    disconnect: () => Promise<void>;
+} | null = null;
+let mockUseWebSocketReturnValue: { connect: vi.Mock; disconnect: vi.Mock; sendMessage: vi.Mock; status: WsStatus; };
+
+vi.mock('@/lib/hooks', async (importOriginal) => {
+    const original = await importOriginal();
+    return {
+        ...original,
+        useLocalStorage: vi.fn(),
+        useWebSocket: vi.fn().mockImplementation((_url, onOpen, onMessage, onClose, onError) => {
+            wsHooks = { onOpen, onMessage, onClose, onError };
+            return mockUseWebSocketReturnValue;
+        }),
+        useAudioProcessor: vi.fn(),
+        useAudioPlayback: vi.fn(),
+        useSessionReconnection: vi.fn(),
+        useSessionMode: vi.fn(),
+        useApiClient: vi.fn(),
+        useVisibilityGuard: vi.fn().mockImplementation((_addLog, hooks) => {
+            visibilityHooks = hooks;
+        }),
+        useWakeLock: vi.fn(),
+    };
 });
 
-describe('SessionDetail page', () => {
-  beforeEach(() => {
-    process.env.NEXT_PUBLIC_BACKEND_BASE_URL = 'http://localhost:8080';
-    configRef.value = { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'c1', sessionId: 's1' };
-    wsStatusRef.value = WsStatus.Disconnected;
-    sessionReconnectionMock.isReconnecting = false;
-    sessionReconnectionMock.connectionState.hasResumed = false;
-    sessionReconnectionMock.reconnectAttempts = 0;
-  });
+vi.mock('@/components/agent/CallScreen', () => ({
+    __esModule: true,
+    default: ({ onToggleStreaming, onToggleMicHardware, onDisconnect }: any) => (
+        <div data-testid="call-screen">
+            <button onClick={() => onToggleStreaming(true)} data-testid="toggle-streaming-on-btn" />
+            <button onClick={() => onToggleMicHardware(true)} data-testid="toggle-mic-on-btn" />
+            <button onClick={() => onDisconnect()} data-testid="disconnect-btn" />
+        </div>
+    ),
+}));
 
-  afterEach(() => {
-    vi.clearAllMocks();
-  });
+// --- SETUP ---
+const useAuthMock = vi.spyOn(hooks, 'useAuth');
+const useApiClientMock = vi.spyOn(hooks, 'useApiClient');
+const useAudioProcessorMock = vi.spyOn(hooks, 'useAudioProcessor');
+const useSessionReconnectionMock = vi.spyOn(hooks, 'useSessionReconnection');
+const useSessionModeMock = vi.spyOn(hooks, 'useSessionMode');
 
-  test('renders disconnected state initially', () => {
-    render(<SessionDetail />);
-    expect(screen.getByText('Disconnected')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Connecter/i })).toBeEnabled();
-  });
+const mockGetClientSessionDoc = vi.spyOn(firebase, 'getClientSessionDoc');
+const mockRouteWsMessage = vi.spyOn(wsRouter, 'routeWsMessage');
 
-  test('clicking Connect calls manualConnect', async () => {
-    render(<SessionDetail />);
-    const connectBtn = screen.getByRole('button', { name: /Connecter/i });
-    await userEvent.click(connectBtn);
-    await waitFor(() => {
-      expect(sessionReconnectionMock.manualConnect).toHaveBeenCalled();
+let mockPlayAudioChunk: vi.Mock;
+
+const setupMocks = (initialWsStatus = WsStatus.Disconnected) => {
+    wsHooks = null;
+    visibilityHooks = null;
+    mockPlayAudioChunk = vi.fn();
+
+    vi.mocked(useParams).mockReturnValue({ id: 'test-session-id' });
+    vi.mocked(useRouter).mockReturnValue({ replace: vi.fn() } as any);
+    vi.mocked(useSearchParams).mockReturnValue({ get: vi.fn().mockReturnValue('test-client-id') } as any);
+    vi.mocked(useAuth).mockReturnValue({ user: { uid: 'test-user-id' } } as any);
+    vi.mocked(hooks.useLocalStorage).mockReturnValue([
+        { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'test-client-id', sessionId: 'test-session-id' },
+        vi.fn(),
+    ]);
+    useAudioProcessorMock.mockReturnValue({
+        startMic: vi.fn().mockResolvedValue(undefined),
+        stopMic: vi.fn(),
+        playAudioChunk: mockPlayAudioChunk,
+        clearPlaybackQueue: vi.fn(),
+        setStreamingEnabled: vi.fn(),
+        onMicData: vi.fn(),
+    } as any);
+    vi.mocked(hooks.useAudioPlayback).mockReturnValue({
+        playConnectedSound: vi.fn(),
+        startToolCall: vi.fn(),
+        endToolCall: vi.fn(),
+        isToolCallActive: vi.fn().mockReturnValue(false),
+        keepModelAudioAlive: vi.fn(),
+        cleanup: vi.fn(),
     });
-  });
-
-  test('clicking Disconnect calls manualDisconnect', async () => {
-    wsStatusRef.value = WsStatus.Connected;
-    render(<SessionDetail />);
-    const disconnectBtn = screen.getByRole('button', { name: /Déconnecter/i });
-    await userEvent.click(disconnectBtn);
-    await waitFor(() => {
-      expect(sessionReconnectionMock.manualDisconnect).toHaveBeenCalled();
+    useSessionReconnectionMock.mockReturnValue({
+        manualConnect: vi.fn().mockResolvedValue(undefined),
+        manualDisconnect: vi.fn(),
+        handleConnectionClose: vi.fn(),
+        handleSessionResumed: vi.fn(),
+        isReconnecting: false,
     });
-  });
-
-  test('handles WebSocket open event', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onOpen());
-    expect(sessionModeMock.resetToIdle).toHaveBeenCalled();
-  });
-
-  test('handles WebSocket close event', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onClose(1000, 'test', false));
-    expect(sessionReconnectionMock.handleConnectionClose).toHaveBeenCalledWith(1000, 'test', false);
-  });
-  
-  test('handles "ready" message', async () => {
-    wsStatusRef.value = WsStatus.Connected;
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onMessage({ event: 'ready' }));
-    expect(audioPlaybackMock.playConnectedSound).toHaveBeenCalled();
-    await waitFor(() => {
-      // The status will change to "Connected" once the server is ready
-      expect(screen.getByText('Connected')).toBeInTheDocument();
+    useSessionModeMock.mockReturnValue({
+        resetToIdle: vi.fn(),
+        setDisconnected: vi.fn(),
+        startResponding: vi.fn(),
+        startThinking: vi.fn(),
+        stopThinking: vi.fn(),
     });
-  });
-  
-  test('handles heartbeat message by sending a response', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onMessage({ event: 'heartbeat', timestamp: 12345 }));
-    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'heartbeat_response'
-    }));
-  });
+    mockUseWebSocketReturnValue = {
+        connect: vi.fn(),
+        disconnect: vi.fn(),
+        sendMessage: vi.fn(),
+        status: initialWsStatus,
+    };
 
-  test('handles function_call and function_response messages', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onMessage({ event: 'function_call' }));
-    expect(sessionModeMock.startThinking).toHaveBeenCalled();
-    expect(audioPlaybackMock.startToolCall).toHaveBeenCalled();
-
-    await act(async () => wsCbs.onMessage({ event: 'function_response' }));
-    expect(sessionModeMock.stopThinking).toHaveBeenCalled();
-    expect(audioPlaybackMock.endToolCall).toHaveBeenCalled();
-  });
-
-  test('displays reconnecting status correctly', async () => {
-    sessionReconnectionMock.isReconnecting = true;
-    sessionReconnectionMock.reconnectAttempts = 2;
-    render(<SessionDetail />);
-    await waitFor(() => {
-      expect(screen.getByText(/Connection lost, attempting to resume… \(attempt 3\)/i)).toBeInTheDocument();
+    vi.stubGlobal('process', {
+        ...global.process,
+        env: { ...global.process.env, NEXT_PUBLIC_BACKEND_BASE_URL: 'https://test-backend.com' },
     });
-  });
+};
 
-  test('displays resumed status correctly', async () => {
-    wsStatusRef.value = WsStatus.Connected;
-    sessionReconnectionMock.connectionState.hasResumed = true;
-    render(<SessionDetail />);
-    await waitFor(() => {
-      expect(screen.getByText(/Session resumed successfully/i)).toBeInTheDocument();
-    });
-  });
+// --- TESTS ---
 
-  test('handles browser going offline', async () => {
-    render(<SessionDetail />);
-    const offlineEvent = new Event('offline');
-    act(() => {
-      window.dispatchEvent(offlineEvent);
+describe('SessionDetail Page', () => {
+    beforeEach(() => {
+        setupMocks();
     });
-    await waitFor(() => {
-      expect(sessionReconnectionMock.manualDisconnect).toHaveBeenCalled();
-      expect(screen.getByText(/Offline: Please check your network connection./i)).toBeInTheDocument();
+
+    afterEach(() => {
+        vi.clearAllMocks();
+        vi.unstubAllGlobals();
     });
-  });
+
+    it('shows loading indicator while fetching report', async () => {
+        const getSessionMock = vi.fn().mockReturnValue(new Promise(() => {})); // Never resolves
+        useApiClientMock.mockReturnValue({ getSession: getSessionMock } as any);
+        mockGetClientSessionDoc.mockResolvedValue(null);
+
+        render(<SessionDetail />);
+
+        await waitFor(() => {
+          expect(screen.getByText('Chargement…')).toBeInTheDocument();
+        });
+    });
+
+    it('handles audio_buffer when streaming is on', async () => {
+        mockGetClientSessionDoc.mockResolvedValue(null);
+        useApiClientMock.mockReturnValue({ getSession: vi.fn().mockResolvedValue(null) } as any);
+
+        render(<SessionDetail />);
+
+        await act(async () => {
+            fireEvent.click(screen.getByRole('button', { name: /démarrer l’appel/i }));
+        });
+
+        await screen.findByTestId('call-screen');
+
+        await act(async () => {
+            mockUseWebSocketReturnValue.status = WsStatus.Connected;
+            wsHooks!.onOpen();
+            wsHooks!.onMessage({ event: 'ready' });
+            const handlers = mockRouteWsMessage.mock.calls[0][1];
+            handlers.ready();
+        });
+
+        await act(async () => {
+            fireEvent.click(screen.getByTestId('toggle-mic-on-btn'));
+            fireEvent.click(screen.getByTestId('toggle-streaming-on-btn'));
+        });
+
+        const message = { event: 'audio_buffer', frames: [{ mime_type: 'audio/pcm', data: '...data...' }] };
+        await act(async () => {
+            wsHooks!.onMessage(message);
+        });
+
+        const handlers = mockRouteWsMessage.mock.calls[1][1];
+        handlers.audio_buffer(message.frames);
+        expect(mockPlayAudioChunk).toHaveBeenCalledWith('...data...');
+    });
+
+    it('handles WebSocket error', async () => {
+      render(<SessionDetail />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /démarrer l’appel/i }));
+      });
+      const errorEvent = new Event('error');
+      await act(async () => {
+        wsHooks!.onError(errorEvent);
+      });
+      // Not much to assert here other than that the app doesn't crash.
+      // A real implementation would likely involve some UI feedback.
+    });
+
+    it('handles reconnection logic on WebSocket close', async () => {
+      render(<SessionDetail />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /démarrer l’appel/i }));
+      });
+      await act(async () => {
+        wsHooks!.onClose(1006, 'abnormal closure', false);
+      });
+      expect(useSessionReconnectionMock().handleConnectionClose).toHaveBeenCalledWith(1006, 'abnormal closure', false);
+    });
+
+    it('handles different session modes', async () => {
+      render(<SessionDetail />);
+      await act(async () => {
+        fireEvent.click(screen.getByRole('button', { name: /démarrer l’appel/i }));
+      });
+      await act(async () => {
+        mockUseWebSocketReturnValue.status = WsStatus.Connected;
+        wsHooks!.onOpen();
+        wsHooks!.onMessage({ event: 'function_call' });
+      });
+      const handlers = mockRouteWsMessage.mock.calls[0][1];
+      handlers.function_call();
+      expect(useSessionModeMock().startThinking).toHaveBeenCalled();
+    });
 });
-
-

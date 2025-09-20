@@ -258,6 +258,7 @@ function SessionsPageInner() {
                     firestoreSessions.map((s) => (
                       <div
                         key={s.id}
+                        data-testid={`session-card-${s.id}`}
                         className="flex items-center justify-between rounded-md border px-3 py-3 gap-3 md:gap-2 min-h-14 md:min-h-12 cursor-pointer hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none select-none"
                         role="button"
                         tabIndex={0}
