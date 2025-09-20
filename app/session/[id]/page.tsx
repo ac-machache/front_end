@@ -277,14 +277,13 @@ export default function SessionDetail() {
       return;
     }
     if (Array.isArray(frames) && frames.length > 0) {
-      audioPlayback.playModelAudio();
+      audioPlayback.keepModelAudioAlive(2500);
       for (const f of frames) {
         if (f?.mime_type?.startsWith('audio/')) {
           playAudioChunk(f.data);
         }
       }
       sessionMode.startResponding(2500);
-      setTimeout(() => audioPlayback.endModelAudio(), 2500);
       addLog(LogLevel.Event, 'Played audio_buffer frames', { count: frames.length });
     }
   }, [addLog, audioPlayback, playAudioChunk, sessionMode, uiState.isStreamingOn]);
@@ -335,10 +334,9 @@ export default function SessionDetail() {
       return;
     }
     if (msg.mime_type?.startsWith('audio/')) {
-      audioPlayback.playModelAudio();
+      audioPlayback.keepModelAudioAlive(2500);
       playAudioChunk(msg.data as string);
       sessionMode.startResponding(2500);
-      setTimeout(() => audioPlayback.endModelAudio(), 2500);
       addLog(LogLevel.Audio, 'Played audio_data chunk', { len });
     }
   }, [addLog, audioPlayback, playAudioChunk, sessionMode, uiState.isStreamingOn]);

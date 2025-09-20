@@ -330,6 +330,7 @@ export function useAudioPlayback(
   const toolLoopingRef = useRef<boolean>(false);
   const toolCallActiveRef = useRef<boolean>(false);
   const thinkingTimeoutRef = useRef<number | null>(null);
+  const modelAudioTimerRef = useRef<number | null>(null);
 
   // Audio state tracking
   const audioStateRef = useRef({
@@ -477,6 +478,23 @@ export function useAudioPlayback(
     }
   }, [startToolSound, addLog]);
 
+  const keepModelAudioAlive = useCallback((durationMs: number = 1500) => {
+    try {
+      // Ensure model audio has priority
+      playModelAudio();
+      // Reset debounce timer so only the last frame ends the model audio state
+      if (modelAudioTimerRef.current) {
+        window.clearTimeout(modelAudioTimerRef.current);
+        modelAudioTimerRef.current = null;
+      }
+      modelAudioTimerRef.current = window.setTimeout(() => {
+        endModelAudio();
+      }, durationMs);
+    } catch (err) {
+      addLog(LogLevelEnum.Audio, 'keepModelAudioAlive error', err);
+    }
+  }, [playModelAudio, endModelAudio, addLog]);
+
   const startToolCall = useCallback(() => {
     const state = audioStateRef.current;
 
@@ -534,6 +552,10 @@ export function useAudioPlayback(
       window.clearTimeout(thinkingTimeoutRef.current);
       thinkingTimeoutRef.current = null;
     }
+    if (modelAudioTimerRef.current) {
+      window.clearTimeout(modelAudioTimerRef.current);
+      modelAudioTimerRef.current = null;
+    }
   }, [stopToolSound]);
 
   // Initialize sounds on mount
@@ -548,6 +570,7 @@ export function useAudioPlayback(
     stopToolSound,
     playModelAudio,
     endModelAudio,
+    keepModelAudioAlive,
     startToolCall,
     endToolCall,
     cleanup,
