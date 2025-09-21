@@ -5,6 +5,7 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
     this.buffer = new Float32Array(this.bufferSize);
     this.writeIndex = 0;
     this.readIndex = 0;
+    this.hadData = false;
     this.port.onmessage = (event) => {
       if (event.data?.command === 'endOfAudio') { this.readIndex = this.writeIndex; return; }
       if (event.data instanceof ArrayBuffer) {
@@ -15,6 +16,8 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
           this.writeIndex = (this.writeIndex + 1) % this.bufferSize;
           if (this.writeIndex === this.readIndex) this.readIndex = (this.readIndex + 1) % this.bufferSize;
         }
+        // Mark that we have data after write
+        this.hadData = true;
       }
     };
   }
@@ -26,6 +29,12 @@ class PCMPlayerProcessor extends AudioWorkletProcessor {
       if (output.length > 1) output[1][i] = this.buffer[this.readIndex];
       if (this.readIndex !== this.writeIndex) this.readIndex = (this.readIndex + 1) % this.bufferSize;
     }
+    // Detect transition to empty buffer and notify main thread once
+    const hasData = this.readIndex !== this.writeIndex;
+    if (this.hadData && !hasData) {
+      this.port.postMessage({ event: 'buffer_empty' });
+    }
+    this.hadData = hasData;
     return true;
   }
 }

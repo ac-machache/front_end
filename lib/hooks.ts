@@ -208,7 +208,8 @@ export function useWebSocket(
 export function useAudioProcessor(
   onMicData: (base64Data: string, mime?: string) => void,
   addLog: (level: LogLevel, message: string, data?: unknown) => void,
-  onLevel?: (level01: number) => void
+  onLevel?: (level01: number) => void,
+  onPlaybackDrained?: () => void
 ) {
   const playerContext = useRef<AudioContext | null>(null);
   const recorderContext = useRef<AudioContext | null>(null);
@@ -236,6 +237,15 @@ export function useAudioProcessor(
         const [player, audioContext] = await startAudioPlayerWorklet();
         await audioContext.resume().catch(() => {});
         audioPlayerNode.current = player; playerContext.current = audioContext;
+        // Listen for drain events from the player worklet to end model audio precisely
+        try {
+          audioPlayerNode.current.port.onmessage = (e: MessageEvent) => {
+            const data = (e as unknown as { data?: unknown }).data as { event?: string } | undefined;
+            if (data && data.event === 'buffer_empty') {
+              try { onPlaybackDrained && onPlaybackDrained(); } catch {}
+            }
+          };
+        } catch {}
       }
 
       // Initialize recorder only once
@@ -478,7 +488,7 @@ export function useAudioPlayback(
     }
   }, [startToolSound, addLog]);
 
-  const keepModelAudioAlive = useCallback((durationMs: number = 1500) => {
+  const keepModelAudioAlive = useCallback((durationMs: number = 500) => {
     try {
       // Ensure model audio has priority
       playModelAudio();

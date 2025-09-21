@@ -170,7 +170,12 @@ export default function SessionDetail() {
       sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
     }
   }, [uiState.isOnline, uiState.serverAlive, isToolCallActive]);
-  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(onMicData, addLog, (lvl) => { lastLevelRef.current = lvl; });
+  const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(
+    onMicData,
+    addLog,
+    (lvl) => { lastLevelRef.current = lvl; },
+    () => { try { audioPlayback.endModelAudio(); } catch {} }
+  );
 
   // Initialize session reconnection hook
   const sessionReconnection = useSessionReconnection(
@@ -277,7 +282,7 @@ export default function SessionDetail() {
       return;
     }
     if (Array.isArray(frames) && frames.length > 0) {
-      audioPlayback.keepModelAudioAlive(2500);
+      audioPlayback.keepModelAudioAlive(500);
       for (const f of frames) {
         if (f?.mime_type?.startsWith('audio/')) {
           playAudioChunk(f.data);
@@ -334,7 +339,7 @@ export default function SessionDetail() {
       return;
     }
     if (msg.mime_type?.startsWith('audio/')) {
-      audioPlayback.keepModelAudioAlive(2500);
+      audioPlayback.keepModelAudioAlive(500);
       playAudioChunk(msg.data as string);
       sessionMode.startResponding(2500);
       addLog(LogLevel.Audio, 'Played audio_data chunk', { len });
