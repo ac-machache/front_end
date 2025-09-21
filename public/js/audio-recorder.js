@@ -9,7 +9,14 @@ export async function startAudioRecorderWorklet(onPcmBuffer) {
     await audioRecorderContext.audioWorklet.addModule(workletURL);
   }
 
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1 } });
+  micStream = await navigator.mediaDevices.getUserMedia({
+    audio: {
+      channelCount: 1,
+      echoCancellation: { ideal: true },
+      noiseSuppression: false,
+      autoGainControl: false
+    }
+  });
   const source = audioRecorderContext.createMediaStreamSource(micStream);
 
   if (canUseWorklet) {
