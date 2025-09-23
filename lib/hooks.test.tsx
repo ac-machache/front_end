@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
-import React from 'react';
 import { renderHook, act } from '@testing-library/react';
 import { useLocalStorage, useApiClient } from './hooks';
 import type { Config } from './types';

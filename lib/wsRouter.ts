@@ -12,7 +12,6 @@ export type WireMessage = {
 
 export type WsHandlers = {
   ready: () => void;
-  session_resumed: (state: unknown) => void;
   speech_start: () => void;
   speech_end: () => void;
   audio_buffer: (frames: WireFrame[]) => void;
@@ -32,8 +31,6 @@ export function routeWsMessage(raw: unknown, handlers: WsHandlers) {
     switch (msg.event) {
       case 'ready':
         return handlers.ready();
-      case 'session_resumed':
-        return handlers.session_resumed(msg.state);
       case 'speech_start':
         return handlers.speech_start();
       case 'speech_end':

@@ -3,24 +3,20 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Loader2 } from 'lucide-react';
-import ControlBarLite from '@/components/agent/ControlBarLite';
 import CallScreen from '@/components/agent/CallScreen';
-import type { Config, HeartbeatEvent, SessionResumedEvent, SessionDetails } from '@/lib/types';
+import type { Config, HeartbeatEvent, SessionDetails } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import {
   useLocalStorage,
   useWebSocket,
   useAudioProcessor,
   useAudioPlayback,
-  useSessionReconnection,
   useSessionMode,
   useApiClient,
   useVisibilityGuard,
   useWakeLock
 } from '@/lib/hooks';
 import { useSearchParams } from 'next/navigation';
-import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { TelephoneSolid } from '@mynaui/icons-react';
 import { PanelRightOpenSolid } from '@mynaui/icons-react';
 import { routeWsMessage } from '@/lib/wsRouter';
@@ -55,13 +51,15 @@ export default function SessionDetail() {
   // Report state for this session
   const [reportDetails, setReportDetails] = useState<SessionDetails | null>(null);
   const [reportLoading, setReportLoading] = useState<boolean>(false);
-  const [expandedReportSection, setExpandedReportSection] = useState<React.Key | null>('main_report');
-  const [expandedStrategicSection, setExpandedStrategicSection] = useState<React.Key | null>('proactive_insights');
 
   const lastHeartbeatAtRef = useRef<number>(Date.now());
   const lastWsMessageAtRef = useRef<number>(Date.now());
   const micHwBeforeHideRef = useRef<boolean>(false);
   const streamingBeforeHideRef = useRef<boolean>(false);
+
+  // Create refs to avoid TDZ issues
+  const connectRef = React.useRef<() => void>(() => {});
+  const disconnectRef = React.useRef<() => void>(() => {});
 
   // Initialize hooks
   const addLog = useCallback((level: LogLevel, message: string, data?: unknown) => {
@@ -177,16 +175,6 @@ export default function SessionDetail() {
     () => { try { audioPlayback.endModelAudio(); } catch {} }
   );
 
-  // Initialize session reconnection hook
-  const sessionReconnection = useSessionReconnection(
-    addLog,
-    startMic,
-    stopMic,
-    () => connect(),
-    () => disconnect(),
-    setStreamingEnabled,
-    clearPlaybackQueue
-  );
 
   // Define after useAudioProcessor to avoid TDZ; then assign in effect
   const onWsOpenRef = useRef<() => void>(() => {});
@@ -209,7 +197,7 @@ export default function SessionDetail() {
     const handleOffline = () => {
       setUiState(prev => ({ ...prev, isOnline: false }));
       addLog(LogLevel.Ws, 'Browser offline', { online: false, visibility: typeof document !== 'undefined' ? document.visibilityState : undefined });
-      sessionReconnection.manualDisconnect();
+      disconnectRef.current();
       audioPlayback.cleanup();
       sessionMode.setDisconnected();
       // Reset local flags
@@ -225,18 +213,8 @@ export default function SessionDetail() {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, [addLog, sessionReconnection, audioPlayback, sessionMode, setStreamingEnabled]);
+  }, [addLog, disconnectRef, audioPlayback, sessionMode, setStreamingEnabled]);
 
-  type WireMessage = { 
-    event?: string; 
-    name?: string; 
-    turn_complete?: unknown; 
-    interrupted?: unknown; 
-    mime_type?: string; 
-    data?: unknown;
-    frames?: Array<{ mime_type: string; data: string }>;
-    state?: SessionResumedEvent['state'];
-  };
 
   // --- WebSocket Message Handlers ---
   const handleReady = useCallback(() => {
@@ -245,17 +223,10 @@ export default function SessionDetail() {
       toolCallActive: audioPlayback.isToolCallActive(),
       wsStatus: wsStatusRef.current
     });
-    if (sessionReconnection.isReconnecting && isMicOnRef.current) {
-      setStreamingEnabled(true);
-    }
     serverReadyRef.current = true;
     setUiState(prev => ({ ...prev, serverReady: true }));
-  }, [addLog, audioPlayback, sessionReconnection, setStreamingEnabled]);
+  }, [addLog, audioPlayback]);
 
-  const handleSessionResumed = useCallback((state: SessionResumedEvent['state']) => {
-    addLog(LogLevel.Resume, 'Session resumed', state);
-    sessionReconnection.handleSessionResumed(state);
-  }, [addLog, sessionReconnection]);
 
   const handleSpeechControl = useCallback((event: 'speech_start' | 'speech_end') => {
     if (event === 'speech_start') {
@@ -350,7 +321,6 @@ export default function SessionDetail() {
     lastWsMessageAtRef.current = Date.now();
     routeWsMessage(data, {
       ready: handleReady,
-      session_resumed: (state) => state && handleSessionResumed(state as SessionResumedEvent['state']),
       speech_start: () => handleSpeechControl('speech_start'),
       speech_end: () => handleSpeechControl('speech_end'),
       audio_buffer: (frames) => handleAudioBuffer(frames),
@@ -362,7 +332,7 @@ export default function SessionDetail() {
       audio_data: handleAudioData,
       fallback: (ev, payload) => addLog(LogLevel.Event, String(ev), payload)
     });
-  }, [addLog, handleReady, handleSessionResumed, handleSpeechControl, handleAudioBuffer, handleHeartbeat, handleFunctionCall, handleFunctionResponse, clearPlaybackQueue, handleTurnControl, handleAudioData]);
+  }, [addLog, handleReady, handleSpeechControl, handleAudioBuffer, handleHeartbeat, handleFunctionCall, handleFunctionResponse, clearPlaybackQueue, handleTurnControl, handleAudioData]);
 
   const onWsClose = useCallback((code?: number, reason?: string, wasManual?: boolean) => {
     const now = Date.now();
@@ -390,15 +360,17 @@ export default function SessionDetail() {
     setUiState(prev => ({ ...prev, serverReady: false, isMicHwOn: false, isStreamingOn: false }));
     sessionMode.resetToIdle();
     clearPlaybackQueue();
-    sessionReconnection.handleConnectionClose(code, reason, wasManual);
     // Prepare next connect sound and close overlay
     pendingConnectedSoundRef.current = true;
     connectedSoundPlayedRef.current = false;
     setSessionStarted(false);
-  }, [addLog, stopMic, audioPlayback, setStreamingEnabled, sessionMode, clearPlaybackQueue, sessionReconnection, uiState.serverAlive, isToolCallActive, wsUrl]);
+  }, [addLog, stopMic, audioPlayback, setStreamingEnabled, sessionMode, clearPlaybackQueue, uiState.serverAlive, isToolCallActive, wsUrl]);
 
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, () => onWsOpenRef.current(), onWsMessage, onWsClose, onWsError);
+
+  // Update refs after WebSocket hook initialization
+  React.useEffect(() => { connectRef.current = connect; disconnectRef.current = disconnect; }, [connect, disconnect]);
   React.useEffect(() => { wsStatusRef.current = wsStatus; }, [wsStatus]);
 
   React.useEffect(() => {
@@ -408,12 +380,12 @@ export default function SessionDetail() {
   // Ensure a clean slate before manualConnect: if an old connecting socket lingers, replace it
   const safeManualConnect = React.useCallback(async () => {
     try {
-      await sessionReconnection.manualConnect(false);
+      connectRef.current();
     } catch (e) {
       addLog(LogLevel.Error, 'safeManualConnect failed', e);
       throw e;
     }
-  }, [sessionReconnection, addLog]);
+  }, [connectRef, addLog]);
 
   React.useEffect(() => {
     const t = window.setInterval(() => {
@@ -476,7 +448,7 @@ export default function SessionDetail() {
     },
     disconnect: async () => {
       try { sendMessageRef.current({ event: 'client_disconnect', intent: 'hidden_timeout' }); } catch {}
-      sessionReconnection.manualDisconnect();
+      disconnectRef.current();
       pendingConnectedSoundRef.current = true;
       connectedSoundPlayedRef.current = false;
       setSessionStarted(false);
@@ -803,7 +775,7 @@ export default function SessionDetail() {
           onDisconnect={async () => {
                       setUiState(prev => ({ ...prev, isDisconnecting: true }));
                       try { sendMessageRef.current({ event: 'client_disconnect', intent: 'manual' }); } catch {}
-                      sessionReconnection.manualDisconnect();
+                      disconnectRef.current();
             setSessionStarted(false);
             pendingConnectedSoundRef.current = false;
             connectedSoundPlayedRef.current = false;

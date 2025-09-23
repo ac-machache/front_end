@@ -112,7 +112,7 @@ export function useWebSocket(
   const hasConnectedSuccessfullyRef = useRef(false); // New ref to track connection success
   const [status, setStatus] = useState<WsStatus>(WsStatusEnum.Disconnected);
   
-  const connect = useCallback((resumeConnection = false) => {
+  const connect = useCallback(() => {
     if (ws.current) {
       const state = ws.current.readyState;
       if (state === WebSocket.OPEN) {
@@ -168,10 +168,10 @@ export function useWebSocket(
     
     socket.onerror = (event) => { setStatus(WsStatusEnum.Error); try { onErrorRef.current(event); } catch {} };
     ws.current = socket;
-  }, [url, onOpen, onMessage, onClose, onError]);
+  }, [url]);
   
   // No auto-resume: just call connect as-is
-  const connectWithResume = useCallback(() => { connect(false); }, [connect]);
+  const connectWithResume = useCallback(() => { connect(); }, [connect]);
   
   const disconnect = useCallback(() => {
     if (!ws.current) { setStatus(WsStatusEnum.Disconnected); return; }
@@ -242,7 +242,7 @@ export function useAudioProcessor(
           audioPlayerNode.current.port.onmessage = (e: MessageEvent) => {
             const data = (e as unknown as { data?: unknown }).data as { event?: string } | undefined;
             if (data && data.event === 'buffer_empty') {
-              try { onPlaybackDrained && onPlaybackDrained(); } catch {}
+              try { if (onPlaybackDrained) onPlaybackDrained(); } catch {}
             }
           };
         } catch {}
@@ -303,7 +303,7 @@ export function useAudioProcessor(
       const message = err instanceof Error ? err.message : String(err);
       addLog(LogLevelEnum.Error, `Error starting microphone: ${message}`, err);
     }
-  }, [addLog, onMicData, onLevel]);
+  }, [addLog, onMicData, onLevel, onPlaybackDrained]);
 
   const stopMic = useCallback(() => {
     if (recorderNode.current) { recorderNode.current.disconnect(); recorderNode.current = null; }
@@ -322,7 +322,7 @@ export function useAudioProcessor(
     if (!audioPlayerNode.current) { return; }
     const pcmBytes = base64ToUint8Array(base64Data);
     audioPlayerNode.current.port.postMessage(pcmBytes.buffer);
-  }, [addLog]);
+  }, []);
 
   const clearPlaybackQueue = useCallback(() => { if (audioPlayerNode.current) audioPlayerNode.current.port.postMessage({ command: 'endOfAudio' }); }, []);
 
@@ -546,7 +546,7 @@ export function useAudioPlayback(
       window.clearTimeout(thinkingTimeoutRef.current);
       thinkingTimeoutRef.current = null;
     }
-  }, [stopToolSound, addLog]);
+  }, [addLog, stopToolSound]);
 
   const cleanup = useCallback(() => {
     const state = audioStateRef.current;
@@ -589,162 +589,6 @@ export function useAudioPlayback(
   };
 }
 
-// Session reconnection management
-export function useSessionReconnection(
-  addLog: (level: LogLevel, message: string, data?: unknown) => void,
-  startMic: () => Promise<void>,
-  stopMic: () => void,
-  connect: () => void,
-  disconnect: () => void,
-  setStreamingEnabled: (enabled: boolean) => void,
-  clearPlaybackQueue: () => void
-) {
-  const [isReconnecting, setIsReconnecting] = useState<boolean>(false);
-  const [connectionState, setConnectionState] = useState<{
-    isResuming: boolean;
-    hasResumed: boolean;
-    backendSessionState?: {
-      mode: string;
-      turnId: string | number;
-      hasPendingFunctions: boolean;
-    };
-  }>({
-    isResuming: false,
-    hasResumed: false,
-  });
-
-  const manualDisconnectRef = useRef<boolean>(false);
-  // Disable auto-reconnect: keep simple flags for UI only
-  const shouldAutoReconnectRef = useRef<boolean>(false);
-  const reconnectAttemptsRef = useRef<number>(0);
-  const reconnectTimerRef = useRef<number | null>(null);
-
-  const startReconnection = useCallback((isManualDisconnect: boolean = false) => {
-    if (!isManualDisconnect) {
-      setIsReconnecting(true);
-      setConnectionState(prev => ({ ...prev, isResuming: true, hasResumed: false }));
-    }
-    manualDisconnectRef.current = isManualDisconnect;
-  }, []);
-
-  const endReconnection = useCallback(() => {
-    setIsReconnecting(false);
-    setConnectionState(prev => ({ ...prev, isResuming: false }));
-
-    // Clear resumed state after 5 seconds
-    setTimeout(() => {
-      setConnectionState(prev => ({ ...prev, hasResumed: false }));
-    }, 5000);
-  }, []);
-
-  const handleSessionResumed = useCallback((state: {
-    mode: string;
-    turn_id: string | number;
-    has_pending_functions: boolean;
-  }) => {
-    setConnectionState(prev => ({
-      ...prev,
-      hasResumed: true,
-      isResuming: false,
-      backendSessionState: {
-        mode: state.mode,
-        turnId: state.turn_id,
-        hasPendingFunctions: state.has_pending_functions
-      }
-    }));
-    setIsReconnecting(false);
-  }, []);
-
-  // Remove auto-reconnect attempts
-  const attemptReconnection = useCallback(async () => {
-    addLog(LogLevelEnum.Ws, 'Auto-reconnect disabled; waiting for manual action');
-  }, [addLog]);
-
-  const manualConnect = useCallback(async (restoreMicState: boolean = false) => {
-    manualDisconnectRef.current = false;
-    shouldAutoReconnectRef.current = false;
-
-    // Clear any pending reconnect timers
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-
-    reconnectAttemptsRef.current = 0;
-
-    try {
-      // Only restore mic automatically if explicitly requested
-      if (restoreMicState) {
-        await startMic();
-        setStreamingEnabled(true);
-      }
-      connect();
-    } catch (err) {
-      addLog(LogLevelEnum.Error, 'Manual connect failed', err);
-      throw err;
-    }
-  }, [addLog, startMic, setStreamingEnabled, connect]);
-
-  const manualDisconnect = useCallback(() => {
-    manualDisconnectRef.current = true;
-    shouldAutoReconnectRef.current = false;
-
-    // Clear any pending reconnect timers
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-
-    reconnectAttemptsRef.current = 0;
-
-    // Clean up audio state
-    stopMic();
-    setStreamingEnabled(false);
-    clearPlaybackQueue();
-
-    disconnect();
-  }, [stopMic, setStreamingEnabled, clearPlaybackQueue, disconnect]);
-
-  const handleConnectionClose = useCallback((code?: number, reason?: string, wasManual?: boolean) => {
-    addLog(LogLevelEnum.Ws, 'Connection closed', { code, reason, wasManual });
-
-    if (wasManual) {
-      setConnectionState(prev => ({ ...prev, isResuming: false, hasResumed: false }));
-      setIsReconnecting(false);
-    } else {
-      // No auto reconnect; just update state for UI
-      startReconnection(false);
-    }
-  }, [addLog, startReconnection, attemptReconnection]);
-
-  const handleConnectionOpen = useCallback(() => {
-    endReconnection();
-  }, [endReconnection]);
-
-  const cleanup = useCallback(() => {
-    if (reconnectTimerRef.current) {
-      window.clearTimeout(reconnectTimerRef.current);
-      reconnectTimerRef.current = null;
-    }
-  }, []);
-
-  // Cleanup on unmount
-  useEffect(() => {
-    return cleanup;
-  }, [cleanup]);
-
-  return {
-    isReconnecting,
-    connectionState,
-    reconnectAttempts: reconnectAttemptsRef.current,
-    manualConnect,
-    manualDisconnect,
-    handleConnectionClose,
-    handleConnectionOpen,
-    handleSessionResumed,
-    cleanup
-  };
-}
 
 // Simplified mode management
 export type IAdvisorMode = 'idle' | 'thinking' | 'responding' | 'connecting' | 'disconnected';

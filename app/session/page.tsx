@@ -24,13 +24,8 @@ function SessionsPageInner() {
   const clientId = typeof window !== 'undefined' ? (params?.get('clientId') || '') : '';
 
   // États UI (anciens)
-  const [apiResultTitle, setApiResultTitle] = React.useState('Espace session');
-  const [selectedSession, setSelectedSession] = React.useState<SessionDetails | null>(null);
-  const [isLoadingSession, setIsLoadingSession] = React.useState(false);
   const [isListing, setIsListing] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
-  const [expandedReportSection, setExpandedReportSection] = React.useState<React.Key | null>('main_report');
-  const [expandedStrategicSection, setExpandedStrategicSection] = React.useState<React.Key | null>('proactive_insights');
 
   // Liste des sessions: maintenant stockée dans Firestore (sessions du client)
   const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; is_report_done?: boolean; saved?: boolean }>>([]);
@@ -149,8 +144,6 @@ function SessionsPageInner() {
       }
       setReportReadyById(nextStatusMap);
       setDisplayLabelsById(nextLabelsMap);
-
-      setApiResultTitle('Liste des sessions');
     } finally {
       setIsListing(false);
     }
@@ -189,20 +182,8 @@ function SessionsPageInner() {
     } finally {
       setIsCreating(false);
     }
-  }, [user, clientId, clientDoc?.name, apiClient, addLog, router, refreshSessions]);
+  }, [user, clientId, clientDoc, apiClient, addLog, router, refreshSessions]);
 
-  // Afficher un rapport depuis le backend (getSession)
-  const showSessionDetails = React.useCallback(async (sessionId: string) => {
-    setSelectedSession(null);
-    setIsLoadingSession(true);
-    try {
-      const details = await apiClient.getSession(sessionId) as SessionDetails | null;
-      if (details) setSelectedSession(details);
-      setApiResultTitle('Rapport de Visite');
-    } finally {
-      setIsLoadingSession(false);
-    }
-  }, [apiClient]);
 
   // États de garde UI
   if (loading || !user) {

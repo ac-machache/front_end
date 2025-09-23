@@ -22,7 +22,6 @@ export enum LogLevel {
   Ws = 'WS',
   Http = 'HTTP',
   Audio = 'AUDIO',
-  Resume = 'RESUME',
 }
 
 export interface LogEntry {
@@ -121,24 +120,6 @@ export interface ClientSessionRecord {
   createdAt?: unknown;
 }
 
-// Backend session resumption event types
-export interface SessionResumedEvent {
-  event: 'session_resumed';
-  state: {
-    mode: string;
-    turn_id: number;
-    has_pending_functions: boolean;
-  };
-}
-
-export interface AudioResumeEvent {
-  event: 'audio_resume';
-  state: {
-    agent_mode: string;
-    is_audio_active: boolean;
-    current_turn_id: number;
-  };
-}
 
 // Heartbeat event types
 export interface HeartbeatEvent {
@@ -153,14 +134,4 @@ export interface HeartbeatResponseEvent {
   server_timestamp: number;
 }
 
-// Connection state for UI feedback
-export interface ConnectionState {
-  isResuming: boolean;
-  hasResumed: boolean;
-  backendSessionState?: {
-    mode: string;
-    turnId: number;
-    hasPendingFunctions: boolean;
-  };
-}
 
