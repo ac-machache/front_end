@@ -1,11 +1,21 @@
 "use client";
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import type { Config, WsStatus } from './types';
+import type { Config, WsStatus, SessionDetails } from './types';
 import { LogLevel as LogLevelEnum, WsStatus as WsStatusEnum, LogLevel } from './types';
 import { buildHttpUrl, arrayBufferToBase64, base64ToUint8Array } from './utils';
+import { getClientSessionDoc } from './firebase';
 // Use the same JS modules as the original app, served from /public/js
 // These are standard ES modules under /public, import via absolute path at runtime
 // We will dynamic import them inside startMic to avoid SSR issues
+
+// Constants
+export const AUDIO_CONSTANTS = {
+  MIC_FLUSH_MS: 50,
+  HEARTBEAT_TIMEOUT_MS: 20000,
+  MODEL_AUDIO_KEEP_ALIVE_MS: 500,
+  TOOL_CALL_TIMEOUT_MS: 120000,
+  VISIBILITY_GRACE_MS: 12000,
+} as const;
 
 // Local storage
 export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dispatch<React.SetStateAction<T>>] {
@@ -25,6 +35,50 @@ export function useLocalStorage<T,>(key: string, initialValue: T): [T, React.Dis
     });
   }, [key]);
   return [storedValue, setValue];
+}
+
+// Custom hook for session report fetching
+export function useSessionReport(sessionId: string, clientId: string, user: { uid: string } | null) {
+  const [reportDetails, setReportDetails] = useState<SessionDetails | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+
+  const apiClient = useApiClient({
+    scheme: (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss' : 'ws',
+    host: 'env',
+    port: '0',
+    appName: 'app',
+    userId: clientId || 'user',
+    sessionId: ''
+  }, () => {}); // Simplified logging
+
+  React.useEffect(() => {
+    if (!sessionId || !clientId) {
+      setReportDetails(null);
+      return;
+    }
+
+    setReportLoading(true);
+    (async () => {
+      try {
+        // Prefer Firestore ReportKey if present (requires user.uid)
+        if (user?.uid) {
+          const fsDoc = await getClientSessionDoc(user.uid, clientId, sessionId);
+          const reportKey = fsDoc?.ReportKey;
+          if (reportKey) {
+            setReportDetails({ id: sessionId, state: { RapportDeSortie: reportKey } });
+            return;
+          }
+        }
+        // Fallback to backend
+        const details = await apiClient.getSession(sessionId) as SessionDetails | null;
+        setReportDetails(details);
+      } finally {
+        setReportLoading(false);
+      }
+    })().catch(() => setReportLoading(false));
+  }, [sessionId, clientId, user?.uid, apiClient]);
+
+  return { reportDetails, reportLoading };
 }
 
 // API client
@@ -218,7 +272,6 @@ export function useAudioProcessor(
   const micStreamRef = useRef<MediaStream | null>(null);
   const micChunkQueue = useRef<Uint8Array[]>([]);
   const micFlushTimer = useRef<number | null>(null);
-  const MIC_FLUSH_MS = 50; // Flush mic buffer every 50ms for lower latency
   // Gate to allow pausing the upstream without releasing the mic device
   // Default OFF so UI mic button explicitly enables sending
   const streamingEnabledRef = useRef<boolean>(false);
@@ -297,7 +350,7 @@ export function useAudioProcessor(
           if (streamingEnabledRef.current) {
             onMicData(arrayBufferToBase64(combined.buffer), 'audio/pcm');
           }
-        }, MIC_FLUSH_MS);
+        }, AUDIO_CONSTANTS.MIC_FLUSH_MS);
       }
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
@@ -488,7 +541,7 @@ export function useAudioPlayback(
     }
   }, [startToolSound, addLog]);
 
-  const keepModelAudioAlive = useCallback((durationMs: number = 500) => {
+  const keepModelAudioAlive = useCallback((durationMs: number = AUDIO_CONSTANTS.MODEL_AUDIO_KEEP_ALIVE_MS) => {
     try {
       // Ensure model audio has priority
       playModelAudio();
@@ -525,7 +578,7 @@ export function useAudioPlayback(
     thinkingTimeoutRef.current = window.setTimeout(() => {
       addLog(LogLevelEnum.Event, 'Tool call timeout - ending tool call');
       endToolCall();
-    }, 120000);
+    }, AUDIO_CONSTANTS.TOOL_CALL_TIMEOUT_MS);
   }, [addLog, startToolSound]);
 
   const endToolCall = useCallback(() => {
@@ -681,7 +734,7 @@ export function useVisibilityGuard(
   const isHiddenRef = React.useRef<boolean>(false);
 
   React.useEffect(() => {
-    const GRACE_MS = options.graceMs ?? 12000;
+    const GRACE_MS = options.graceMs ?? AUDIO_CONSTANTS.VISIBILITY_GRACE_MS;
 
     const pause = async () => { try { await options.pause(); } catch {} };
     const restore = async () => { try { await options.restore(); } catch {} };

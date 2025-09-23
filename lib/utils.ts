@@ -10,13 +10,7 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 // URL helpers
-// function sanitizeHost(host: string): string {
-//   const noProto = host.replace(/^https?:\/\//i, '');
-//   return noProto.split('/')[0].trim();
-// }
-
-export function buildHttpUrl(config: Config): string {
-  void config; // avoid unused-arg lint
+function getBackendBaseUrl(): string {
   const base =
     process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
     (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
@@ -27,24 +21,37 @@ export function buildHttpUrl(config: Config): string {
   return base.replace(/\/$/, '');
 }
 
+export function buildHttpUrl(config: Config): string {
+  void config; // avoid unused-arg lint
+  return getBackendBaseUrl();
+}
+
 export function buildWsUrl(config: Config, options?: { resume?: boolean }): string {
-  const base =
-    process.env.NEXT_PUBLIC_BACKEND_BASE_URL ||
-    (typeof window !== 'undefined' && (window as unknown as { __ENV?: Record<string, string> }).__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL) ||
-    '';
-  if (!base) {
-    throw new Error('NEXT_PUBLIC_BACKEND_BASE_URL manquant. Définissez-le dans .env.local');
-  }
+  const base = getBackendBaseUrl();
   const proto = base.startsWith('https') ? 'wss' : 'ws';
   const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
-  
+
   const params = new URLSearchParams();
   params.set('is_audio', 'true');
   if (options?.resume) {
     params.set('resume', 'true');
   }
-  
+
   return `${proto}://${host}/apps/${config.appName}/users/${config.userId}/sessions/${config.sessionId}/ws?${params.toString()}`;
+}
+
+// Unified URL builder for WebSocket connections (simplified for stateless sessions)
+export function buildWebSocketUrl(sessionId: string, userId: string, options?: { isAudio?: boolean }): string {
+  const base = getBackendBaseUrl();
+  const proto = base.startsWith('https') ? 'wss' : 'ws';
+  const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
+
+  const params = new URLSearchParams();
+  if (options?.isAudio !== false) { // Default to true for audio
+    params.set('is_audio', 'true');
+  }
+
+  return `${proto}://${host}/apps/app/users/${userId}/sessions/${sessionId}/ws?${params.toString()}`;
 }
 
 // base64 helpers

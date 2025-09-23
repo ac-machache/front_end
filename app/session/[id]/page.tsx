@@ -14,12 +14,14 @@ import {
   useSessionMode,
   useApiClient,
   useVisibilityGuard,
-  useWakeLock
+  useWakeLock,
+  AUDIO_CONSTANTS
 } from '@/lib/hooks';
 import { useSearchParams } from 'next/navigation';
 import { TelephoneSolid } from '@mynaui/icons-react';
 import { PanelRightOpenSolid } from '@mynaui/icons-react';
 import { routeWsMessage } from '@/lib/wsRouter';
+import { buildWebSocketUrl } from '@/lib/utils';
 import { getClientSessionDoc } from '@/lib/firebase';
 import { useAuth } from '@/components/auth/AuthProvider';
 
@@ -127,30 +129,8 @@ export default function SessionDetail() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [params?.id, clientIdParam, user?.uid]);
 
-  // Backend base detection (safe)
-  const backendBase: string = useMemo(() => {
-    try {
-      const envVar = (process.env.NEXT_PUBLIC_BACKEND_BASE_URL as unknown as string) || '';
-      if (envVar) return envVar.replace(/\/$/, '');
-    } catch {}
-    try {
-      const win = window as unknown as { __ENV?: Record<string, string> };
-      const fromWin = win.__ENV?.NEXT_PUBLIC_BACKEND_BASE_URL || '';
-      if (fromWin) return fromWin.replace(/\/$/, '');
-    } catch {}
-    return '';
-  }, []);
 
-  const buildWsUrlSafe = useCallback((cfg: Config, base: string): string => {
-    if (!base) return '';
-    const proto = base.startsWith('https') ? 'wss' : 'ws';
-    const host = base.replace(/^https?:\/\//, '').replace(/\/$/, '');
-    const params = new URLSearchParams();
-    params.set('is_audio', 'true');
-    return `${proto}://${host}/apps/${cfg.appName}/users/${cfg.userId}/sessions/${cfg.sessionId}/ws?${params.toString()}`;
-  }, []);
-
-  const wsUrl = useMemo(() => buildWsUrlSafe(config, backendBase), [config, backendBase, buildWsUrlSafe]);
+  const wsUrl = useMemo(() => buildWebSocketUrl(params.id!, clientIdParam), [params.id, clientIdParam]);
 
   // Server handshake readiness
   const serverReadyRef = useRef<boolean>(uiState.serverReady);
@@ -390,7 +370,7 @@ export default function SessionDetail() {
   React.useEffect(() => {
     const t = window.setInterval(() => {
       const since = Date.now() - lastHeartbeatAtRef.current;
-      if (since > 20000 && uiState.serverAlive) setUiState(prev => ({ ...prev, serverAlive: false }));
+      if (since > AUDIO_CONSTANTS.HEARTBEAT_TIMEOUT_MS && uiState.serverAlive) setUiState(prev => ({ ...prev, serverAlive: false }));
     }, 5000);
     return () => { try { window.clearInterval(t); } catch {} };
   }, [uiState.serverAlive]);
@@ -454,7 +434,7 @@ export default function SessionDetail() {
       setSessionStarted(false);
       addLog(LogLevel.Ws, 'Hidden grace expired - disconnected');
     },
-    graceMs: 12000
+    graceMs: AUDIO_CONSTANTS.VISIBILITY_GRACE_MS
   });
 
   // Reset to idle when mic state changes
@@ -742,12 +722,6 @@ export default function SessionDetail() {
                       pendingConnectedSoundRef.current = true;
                       connectedSoundPlayedRef.current = false;
                       try {
-                        if (!backendBase) {
-                          setUiState(prev => ({ ...prev, isConnecting: false }));
-                  setSessionStarted(false);
-                          addLog(LogLevel.Error, 'Missing NEXT_PUBLIC_BACKEND_BASE_URL');
-                          return;
-                        }
                         await safeManualConnect();
                         // After WS is up and server ready, the mic button controls hardware.
                         // We keep streamingOff until user toggles the Ear, avoiding premature gating.
