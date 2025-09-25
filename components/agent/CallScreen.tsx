@@ -33,7 +33,7 @@ export default function CallScreen(props: CallScreenProps) {
   } = props;
 
   return (
-    <div className="fixed inset-0 z-40 bg-black text-white">
+    <div className="fixed inset-0 z-40 bg-black text-white" data-testid="call-screen">
       <div className="relative h-full w-full">
         {/* Center logo / waveform */}
         <div className="absolute inset-0 flex items-center justify-center">

@@ -3,7 +3,7 @@ import React, { useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import type { Session, SessionDetails, SessionState } from '@/lib/types';
+import type { Session, SessionDetails, SessionState, Result } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
 import { useApiClient } from '@/lib/hooks';
 import { Loader2 } from 'lucide-react';
@@ -58,10 +58,10 @@ function SessionsPageInner() {
   }, addLog);
 
   // Stabilize backend getter across renders to avoid effect loops
-  const getSessionRef = React.useRef<(id: string) => Promise<SessionDetails | null>>(async () => null);
-  React.useEffect(() => { getSessionRef.current = (apiClient.getSession as (id: string) => Promise<SessionDetails | null>); }, [apiClient]);
-  const listSessionsRef = React.useRef<() => Promise<Session[] | null>>(async () => null);
-  React.useEffect(() => { listSessionsRef.current = (apiClient.listSessions as () => Promise<Session[] | null>); }, [apiClient]);
+  const getSessionRef = React.useRef<(id: string) => Promise<Result<SessionDetails>>>(async () => ({ ok: false, error: new Error('not initialized') }));
+  React.useEffect(() => { getSessionRef.current = apiClient.getSession; }, [apiClient]);
+  const listSessionsRef = React.useRef<() => Promise<Result<Session[]>>>(async () => ({ ok: false, error: new Error('not initialized') }));
+  React.useEffect(() => { listSessionsRef.current = apiClient.listSessions; }, [apiClient]);
 
   // Charger le doc client + la liste des sessions Firestore
   const refreshSessions = useCallback(async () => {
@@ -88,8 +88,8 @@ function SessionsPageInner() {
       // Récupérer la liste des sessions depuis le backend (un seul appel)
       const backendList = await listSessionsRef.current();
       const backendById: Record<string, SessionDetails> = {};
-      if (Array.isArray(backendList)) {
-        for (const s of backendList as SessionDetails[]) {
+      if (backendList.ok) {
+        for (const s of backendList.value) {
           backendById[s.id] = s;
         }
       }
@@ -118,16 +118,17 @@ function SessionsPageInner() {
 
       const nextStatusMap: Record<string, boolean> = {};
       const nextLabelsMap: Record<string, { title: string; subtitle?: string }> = {};
-      for (const s of backendList as SessionDetails[] || []) {
-        const state = (s?.state as SessionState | undefined);
-        const main = state?.RapportDeSortie?.main_report;
+      if (backendList.ok) {
+        for (const s of backendList.value) {
+          const state = (s?.state as SessionState | undefined);
+          const main = state?.RapportDeSortie?.main_report;
         const title = (typeof main?.title === 'string' && main.title.trim() !== '')
           ? main.title
           : (typeof main?.farmer === 'string' && main.farmer.trim() !== '')
             ? main.farmer
             : (typeof state?.nom_agri === 'string' && state.nom_agri.trim() !== '')
               ? state.nom_agri
-              : (clientDoc?.name || s.id);
+              : (c?.name || s.id);
         const dateRaw = (typeof main?.date_of_visit === 'string' && main.date_of_visit.trim() !== '')
           ? main.date_of_visit
           : (typeof s?.lastUpdateTime === 'string' ? s.lastUpdateTime : undefined);
@@ -141,6 +142,7 @@ function SessionsPageInner() {
 
         const ready = !!state?.RapportDeSortie;
         nextStatusMap[s.id] = ready;
+        }
       }
       setReportReadyById(nextStatusMap);
       setDisplayLabelsById(nextLabelsMap);
@@ -165,19 +167,19 @@ function SessionsPageInner() {
       const nom_tc = user.displayName || user.email || 'Utilisateur';
       const nom_agri = clientDoc?.name || 'Client';
 
-      const result = await apiClient.createSession({ nom_tc, nom_agri }) as Session | null;
-      if (result?.id) {
+      const result = await apiClient.createSession({ nom_tc, nom_agri });
+      if (result.ok) {
         // Enregistrer la session dans Firestore sous le même ID (en arrière-plan)
         setClientSessionDoc(
           user.uid,
           clientId,
-          result.id,
+          result.value.id,
           { nom_tc, nom_agri, is_report_done: false, ReportKey: null }
         )
           .then(() => { void refreshSessions(); })
           .catch((err) => { addLog(LogLevel.Error, 'Failed to persist session to Firestore', err); });
         // Aller immédiatement au temps réel
-        router.push(`/session/${result.id}?clientId=${clientId}`);
+        router.push(`/session/${result.value.id}?clientId=${clientId}`);
       }
     } finally {
       setIsCreating(false);

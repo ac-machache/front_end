@@ -1,3 +1,5 @@
+export type Result<T> = { ok: true; value: T } | { ok: false; error: Error };
+
 export interface Config {
   scheme: 'ws' | 'wss';
   host: string;
@@ -134,4 +136,26 @@ export interface HeartbeatResponseEvent {
   server_timestamp: number;
 }
 
-
+export interface UiState {
+    isMicOn: boolean;
+    isMuted: boolean;
+    isThinking: boolean;
+    isSpeaking: boolean;
+    isWaitingForAgent: boolean;
+    isCallScreen: boolean;
+    isConnecting: boolean;
+    isDisconnecting: boolean;
+    isReconnecting: boolean;
+    isResuming: boolean;
+    hasResumed: boolean;
+    isMicHwOn: boolean;
+    isOnline: boolean;
+    serverAlive: boolean;
+    wsConnected: boolean;
+    reconnectAttempts: number;
+    reportDetails: SessionDetails | null;
+    hasReport: boolean;
+    serverReady?: boolean;
+    isListening?: boolean;
+    isStreamingOn?: boolean;
+  }

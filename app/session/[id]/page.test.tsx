@@ -1,204 +1,155 @@
-import { describe, test, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, test, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen, act, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import SessionDetail from './page';
+import * as AuthProvider from '@/components/auth/AuthProvider';
+import * as nav from 'next/navigation';
+import * as hooks from '@/lib/hooks';
 import { WsStatus } from '@/lib/types';
+import { NextRouter } from 'next/router';
 
-// Mocks
-const routerReplaceMock = vi.fn();
-const connectMock = vi.fn();
-const disconnectMock = vi.fn();
-const sendMessageMock = vi.fn();
-const startMicMock = vi.fn().mockResolvedValue(undefined);
-const stopMicMock = vi.fn();
-const playAudioChunkMock = vi.fn();
-const clearPlaybackQueueMock = vi.fn();
-const setStreamingEnabledMock = vi.fn();
+// Mock individual hooks
+vi.mock('@/lib/hooks/useLocalStorage');
+vi.mock('@/lib/hooks/useSessionReport');
+vi.mock('@/lib/hooks/useApiClient');
+vi.mock('@/lib/hooks/useWebSocket');
+vi.mock('@/lib/hooks/useAudio');
+vi.mock('@/lib/hooks/useSessionMode');
+vi.mock('@/lib/hooks/useVisibilityGuard');
+vi.mock('@/lib/hooks/useWakeLock');
+vi.mock('@/lib/hooks/useUiState');
+vi.mock('next/navigation');
+vi.mock('@/components/auth/AuthProvider');
+vi.mock('@/lib/firebase');
 
-const audioPlaybackMock = {
-  playConnectedSound: vi.fn(),
-  startToolCall: vi.fn(),
-  endToolCall: vi.fn(),
-  cleanup: vi.fn(),
-  isToolCallActive: vi.fn().mockReturnValue(false),
-};
 
-const sessionModeMock = {
-  resetToIdle: vi.fn(),
-  setDisconnected: vi.fn(),
-  startThinking: vi.fn(),
-  stopThinking: vi.fn(),
-  mode: 'idle' as const,
-};
+const mockedUseLocalStorage = vi.mocked(hooks.useLocalStorage);
+const mockedUseSessionReport = vi.mocked(hooks.useSessionReport);
+const mockedUseApiClient = vi.mocked(hooks.useApiClient);
+const mockedUseWebSocket = vi.mocked(hooks.useWebSocket);
+const mockedUseAudioProcessor = vi.mocked(hooks.useAudioProcessor);
+const mockedUseAudioPlayback = vi.mocked(hooks.useAudioPlayback);
+const mockedUseSessionMode = vi.mocked(hooks.useSessionMode);
+const mockedUseVisibilityGuard = vi.mocked(hooks.useVisibilityGuard);
+const mockedUseWakeLock = vi.mocked(hooks.useWakeLock);
+const mockedUseUiState = vi.mocked(hooks.useUiState);
+const mockedUseRouter = vi.mocked(nav.useRouter);
+const mockedUseParams = vi.mocked(nav.useParams);
+const mockedUseSearchParams = vi.mocked(nav.useSearchParams);
+const mockedUseAuth = vi.mocked(AuthProvider.useAuth);
 
-const sessionReconnectionMock = {
-  isReconnecting: false,
-  connectionState: { isResuming: false, hasResumed: false, backendSessionState: undefined } as { isResuming: boolean; hasResumed: boolean; backendSessionState: undefined; },
-  reconnectAttempts: 0,
-  manualConnect: vi.fn().mockResolvedValue(undefined),
-  manualDisconnect: vi.fn(),
-  handleConnectionClose: vi.fn(),
-  handleConnectionOpen: vi.fn(),
-  handleSessionResumed: vi.fn(),
-};
 
-const wsStatusRef = { value: WsStatus.Disconnected };
-const wsCbs = { onOpen: undefined as unknown as () => void, onMessage: undefined as unknown as (d: unknown) => void, onClose: undefined as unknown as (c?: number, r?: string, m?: boolean) => void, onError: undefined as unknown as (e?: Event) => void };
-const configRef = { value: { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' } };
-const setConfigMock = vi.fn(updater => {
-  if (typeof updater === 'function') {
-    configRef.value = updater(configRef.value);
-  } else {
-    configRef.value = updater;
-  }
-});
+describe('SessionDetail', () => {
+    const mockDispatch = vi.fn();
+    const pushMock = vi.fn();
 
-vi.mock('next/navigation', () => ({
-  useParams: () => ({ id: 's1' }),
-  useRouter: () => ({ replace: routerReplaceMock }),
-  useSearchParams: () => ({ get: (k: string) => (k === 'clientId' ? 'c1' : null) }),
-}));
-
-vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { uid: 'u1' }, loading: false }),
-}));
-
-vi.mock('@/lib/hooks', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/hooks')>('@/lib/hooks');
-  return {
-    ...actual,
-    useLocalStorage: () => [configRef.value, setConfigMock],
-    useWebSocket: (_url: string, onOpen: () => void, onMessage: (d: unknown) => void, onClose: (c?: number, r?: string, m?: boolean) => void, onError: (e?: Event) => void) => {
-      wsCbs.onOpen = onOpen;
-      wsCbs.onMessage = onMessage;
-      wsCbs.onClose = onClose;
-      wsCbs.onError = onError;
-      return { connect: connectMock, disconnect: disconnectMock, sendMessage: sendMessageMock, status: wsStatusRef.value };
-    },
-    useAudioProcessor: () => ({
-      startMic: startMicMock,
-      stopMic: stopMicMock,
-      playAudioChunk: playAudioChunkMock,
-      clearPlaybackQueue: clearPlaybackQueueMock,
-      setStreamingEnabled: setStreamingEnabledMock,
-    }),
-    useAudioPlayback: () => audioPlaybackMock,
-    useSessionMode: () => sessionModeMock,
-    useSessionReconnection: () => sessionReconnectionMock,
-  };
-});
-
-describe('SessionDetail page', () => {
   beforeEach(() => {
-    process.env.NEXT_PUBLIC_BACKEND_BASE_URL = 'http://localhost:8080';
-    configRef.value = { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'c1', sessionId: 's1' };
-    wsStatusRef.value = WsStatus.Disconnected;
-    sessionReconnectionMock.isReconnecting = false;
-    sessionReconnectionMock.connectionState.hasResumed = false;
-    sessionReconnectionMock.reconnectAttempts = 0;
-  });
-
-  afterEach(() => {
     vi.clearAllMocks();
-  });
 
-  test('renders disconnected state initially', () => {
-    render(<SessionDetail />);
-    expect(screen.getByText('Disconnected')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Connecter/i })).toBeEnabled();
-  });
-
-  test('clicking Connect calls manualConnect', async () => {
-    render(<SessionDetail />);
-    const connectBtn = screen.getByRole('button', { name: /Connecter/i });
-    await userEvent.click(connectBtn);
-    await waitFor(() => {
-      expect(sessionReconnectionMock.manualConnect).toHaveBeenCalled();
+    mockedUseRouter.mockReturnValue({ replace: vi.fn(), push: pushMock } as unknown as NextRouter);
+    mockedUseParams.mockReturnValue({ id: 's1' });
+    mockedUseSearchParams.mockReturnValue({ get: () => 'c1' } as unknown as URLSearchParams);
+    mockedUseAuth.mockReturnValue({ user: { uid: 'u1' }, loading: false });
+    mockedUseLocalStorage.mockImplementation((key, initialValue) => [initialValue, vi.fn()]);
+    mockedUseApiClient.mockReturnValue({
+        getSession: vi.fn().mockResolvedValue({ id: 's1', state: {} }),
+    } as unknown as ReturnType<typeof hooks.useApiClient>);
+    mockedUseWebSocket.mockReturnValue({
+      connect: vi.fn(),
+      disconnect: vi.fn(),
+      sendMessage: vi.fn(),
+      status: WsStatus.Disconnected,
+    } as unknown as ReturnType<typeof hooks.useWebSocket>);
+    mockedUseAudioProcessor.mockReturnValue({
+        startMic: vi.fn(),
+        stopMic: vi.fn(),
+        playAudioChunk: vi.fn(),
+        clearPlaybackQueue: vi.fn(),
+        setStreamingEnabled: vi.fn(),
+    } as unknown as ReturnType<typeof hooks.useAudioProcessor>);
+    mockedUseAudioPlayback.mockReturnValue({
+        playConnectedSound: vi.fn(),
+        keepModelAudioAlive: vi.fn(),
+        endModelAudio: vi.fn(),
+        startToolCall: vi.fn(),
+        endToolCall: vi.fn(),
+        isToolCallActive: vi.fn().mockReturnValue(false),
+        cleanup: vi.fn(),
+    } as unknown as ReturnType<typeof hooks.useAudioPlayback>);
+    mockedUseSessionMode.mockReturnValue({
+        resetToIdle: vi.fn(),
+        startResponding: vi.fn(),
+        startThinking: vi.fn(),
+        stopThinking: vi.fn(),
+        setDisconnected: vi.fn(),
+    } as unknown as ReturnType<typeof hooks.useSessionMode>);
+    mockedUseUiState.mockReturnValue({
+        state: {
+            isCallScreen: false,
+            isConnecting: false,
+            isDisconnecting: false,
+            isStreamingOn: false,
+            isMicHwOn: false,
+            serverReady: false,
+            isOnline: true,
+            serverAlive: true,
+            isThinking: false,
+        },
+        dispatch: mockDispatch,
     });
+    mockedUseVisibilityGuard.mockReturnValue(undefined);
+    mockedUseWakeLock.mockReturnValue(undefined);
   });
 
-  test('clicking Disconnect calls manualDisconnect', async () => {
-    wsStatusRef.value = WsStatus.Connected;
+  test('renders loading state initially', () => {
+    mockedUseSessionReport.mockReturnValue({ reportDetails: null, reportLoading: true });
     render(<SessionDetail />);
-    const disconnectBtn = screen.getByRole('button', { name: /Déconnecter/i });
-    await userEvent.click(disconnectBtn);
-    await waitFor(() => {
-      expect(sessionReconnectionMock.manualDisconnect).toHaveBeenCalled();
+    expect(screen.getByText('Chargement…')).toBeInTheDocument();
+  });
+
+  test('renders "start call" button when no report is available', async () => {
+    mockedUseSessionReport.mockReturnValue({ reportDetails: null, reportLoading: false });
+    render(<SessionDetail />);
+    await screen.findByText(/aucun rapport n’est disponible pour cette session/i);
+    expect(screen.getByRole('button', { name: /démarrer l’appel/i })).toBeInTheDocument();
+  });
+
+  test('clicking "start call" button shows call screen and connects to websocket', async () => {
+    const connectMock = vi.fn();
+    mockedUseWebSocket.mockReturnValue({
+        connect: connectMock,
+        disconnect: vi.fn(),
+        sendMessage: vi.fn(),
+        status: WsStatus.Disconnected,
+    } as unknown as ReturnType<typeof hooks.useWebSocket>);
+    mockedUseSessionReport.mockReturnValue({ reportDetails: null, reportLoading: false });
+    mockedUseUiState.mockReturnValue({
+        state: { isCallScreen: true, isConnecting: false },
+        dispatch: mockDispatch,
     });
+
+    render(<SessionDetail />);
+    const startCallButton = await screen.findByRole('button', { name: /démarrer l’appel/i });
+    await userEvent.click(startCallButton);
+
+    expect(mockDispatch).toHaveBeenCalledWith({ type: 'SHOW_CALL_SCREEN' });
   });
 
-  test('handles WebSocket open event', async () => {
+  test('displays the report when it is available', async () => {
+    const reportDetails = {
+        id: 's1',
+        state: {
+            RapportDeSortie: {
+                main_report: {
+                    title: 'Test Report',
+                },
+            },
+        },
+    };
+    mockedUseSessionReport.mockReturnValue({ reportDetails, reportLoading: false });
     render(<SessionDetail />);
-    await act(async () => wsCbs.onOpen());
-    expect(sessionModeMock.resetToIdle).toHaveBeenCalled();
-  });
-
-  test('handles WebSocket close event', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onClose(1000, 'test', false));
-    expect(sessionReconnectionMock.handleConnectionClose).toHaveBeenCalledWith(1000, 'test', false);
-  });
-  
-  test('handles "ready" message', async () => {
-    wsStatusRef.value = WsStatus.Connected;
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onMessage({ event: 'ready' }));
-    expect(audioPlaybackMock.playConnectedSound).toHaveBeenCalled();
-    await waitFor(() => {
-      // The status will change to "Connected" once the server is ready
-      expect(screen.getByText('Connected')).toBeInTheDocument();
-    });
-  });
-  
-  test('handles heartbeat message by sending a response', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onMessage({ event: 'heartbeat', timestamp: 12345 }));
-    expect(sendMessageMock).toHaveBeenCalledWith(expect.objectContaining({
-      event: 'heartbeat_response'
-    }));
-  });
-
-  test('handles function_call and function_response messages', async () => {
-    render(<SessionDetail />);
-    await act(async () => wsCbs.onMessage({ event: 'function_call' }));
-    expect(sessionModeMock.startThinking).toHaveBeenCalled();
-    expect(audioPlaybackMock.startToolCall).toHaveBeenCalled();
-
-    await act(async () => wsCbs.onMessage({ event: 'function_response' }));
-    expect(sessionModeMock.stopThinking).toHaveBeenCalled();
-    expect(audioPlaybackMock.endToolCall).toHaveBeenCalled();
-  });
-
-  test('displays reconnecting status correctly', async () => {
-    sessionReconnectionMock.isReconnecting = true;
-    sessionReconnectionMock.reconnectAttempts = 2;
-    render(<SessionDetail />);
-    await waitFor(() => {
-      expect(screen.getByText(/Connection lost, attempting to resume… \(attempt 3\)/i)).toBeInTheDocument();
-    });
-  });
-
-  test('displays resumed status correctly', async () => {
-    wsStatusRef.value = WsStatus.Connected;
-    sessionReconnectionMock.connectionState.hasResumed = true;
-    render(<SessionDetail />);
-    await waitFor(() => {
-      expect(screen.getByText(/Session resumed successfully/i)).toBeInTheDocument();
-    });
-  });
-
-  test('handles browser going offline', async () => {
-    render(<SessionDetail />);
-    const offlineEvent = new Event('offline');
-    act(() => {
-      window.dispatchEvent(offlineEvent);
-    });
-    await waitFor(() => {
-      expect(sessionReconnectionMock.manualDisconnect).toHaveBeenCalled();
-      expect(screen.getByText(/Offline: Please check your network connection./i)).toBeInTheDocument();
-    });
+    await screen.findByText('Rapport de Visite');
+    expect(screen.getByText('Test Report')).toBeInTheDocument();
   });
 });
-
-

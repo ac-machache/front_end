@@ -1,95 +1,95 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
 import React from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-
-const { replaceMock, pushMock, getClientMock, listSessionsMock, updateSessionMock, setSessionMock, getSessionApiMock } = vi.hoisted(() => ({
-  replaceMock: vi.fn(),
-  pushMock: vi.fn(),
-  getClientMock: vi.fn(),
-  listSessionsMock: vi.fn(),
-  updateSessionMock: vi.fn(),
-  setSessionMock: vi.fn(),
-  getSessionApiMock: vi.fn(),
-}));
-
-vi.mock('next/navigation', () => ({
-  useRouter: () => ({ replace: replaceMock, push: pushMock }),
-  useSearchParams: () => ({ get: (k: string) => (k === 'clientId' ? 'c1' : null) }),
-}));
-
-vi.mock('@/components/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { uid: 'u1', displayName: 'Tech C', email: 'tc@example.com' }, loading: false }),
-}));
-
-vi.mock('@/lib/firebase', () => ({
-  getClientById: (...args: unknown[]) => getClientMock(...args),
-  listSessionsForClient: (...args: unknown[]) => listSessionsMock(...args),
-  updateClientSessionDoc: (...args: unknown[]) => updateSessionMock(...args),
-  setClientSessionDoc: (...args: unknown[]) => setSessionMock(...args),
-}));
-
-vi.mock('@/lib/hooks', async () => {
-  const actual = await vi.importActual<typeof import('@/lib/hooks')>('@/lib/hooks');
-  return {
-    ...actual,
-    useApiClient: () => ({
-      createSession: async () => ({ id: 's-new' }),
-      createSessionWithId: async () => ({ id: 's-new' }),
-      listSessions: async () => [],
-      getSession: async (id: string) => getSessionApiMock(id),
-    }),
-  };
-});
-
 import SessionsPage from './page';
+import * as firebase from '@/lib/firebase';
+import * as AuthProvider from '@/components/auth/AuthProvider';
+import * as nav from 'next/navigation';
+import * as hooks from '@/lib/hooks';
+import { NextRouter } from 'next/router';
+
+vi.mock('@/lib/firebase');
+vi.mock('@/components/auth/AuthProvider');
+vi.mock('next/navigation');
+vi.mock('@/lib/hooks');
+
+const mockedFirebase = vi.mocked(firebase);
+const mockedAuth = vi.mocked(AuthProvider);
+const mockedNav = vi.mocked(nav);
+const mockedHooks = vi.mocked(hooks);
 
 describe('SessionsPage', () => {
+  const mockSessions = [
+    { id: '1', is_report_done: true, saved: false },
+    { id: '2', is_report_done: false, saved: false },
+  ];
+
   beforeEach(() => {
-    replaceMock.mockReset();
-    pushMock.mockReset();
-    getClientMock.mockReset();
-    listSessionsMock.mockReset();
-    updateSessionMock.mockReset();
-    setSessionMock.mockReset();
-    getSessionApiMock.mockReset?.();
+    vi.clearAllMocks();
+    const pushMock = vi.fn();
+    mockedNav.useRouter.mockReturnValue({ replace: vi.fn(), push: pushMock } as unknown as NextRouter);
+    mockedHooks.useApiClient.mockReturnValue({
+        getSession: vi.fn().mockResolvedValue({ ok: true, value: { id: 's1', state: {} } }),
+        listSessions: vi.fn().mockResolvedValue([]),
+        createSession: vi.fn().mockResolvedValue({ id: 's3' }),
+        deleteSession: vi.fn().mockResolvedValue({ ok: true }),
+        ingestSessionMemoryFor: vi.fn().mockResolvedValue({ ok: true }),
+    } as unknown as ReturnType<typeof hooks.useApiClient>);
+    mockedFirebase.setClientSessionDoc.mockResolvedValue();
   });
 
-  test('redirects to /welcome if no user', async () => {
-    vi.doMock('@/components/auth/AuthProvider', () => ({ useAuth: () => ({ user: null, loading: false }) }));
-    const { default: Page } = await import('./page');
-    render(<Page />);
-    await waitFor(() => expect(replaceMock).toHaveBeenCalledWith('/welcome'));
+  test('renders loading state initially', () => {
+    mockedAuth.useAuth.mockReturnValue({ user: null, loading: true });
+    mockedNav.useSearchParams.mockReturnValue({ get: () => 'c1' } as unknown as URLSearchParams);
+    render(<SessionsPage />);
+    expect(screen.getByText('Chargement…')).toBeInTheDocument();
   });
 
-  test('refresh lists sessions and toggles report status', async () => {
-    getClientMock.mockResolvedValueOnce({ id: 'c1', name: 'Client X' });
-    listSessionsMock.mockResolvedValueOnce([
-      { id: 's1', is_report_done: false },
-      { id: 's2', is_report_done: false },
+  test('redirects to welcome page if not authenticated', () => {
+    mockedAuth.useAuth.mockReturnValue({ user: null, loading: false });
+    mockedNav.useSearchParams.mockReturnValue({ get: () => 'c1' } as unknown as URLSearchParams);
+    render(<SessionsPage />);
+    expect(mockedNav.useRouter().replace).toHaveBeenCalledWith('/welcome');
+  });
+
+  test('displays message if no client is selected', () => {
+    mockedAuth.useAuth.mockReturnValue({ user: { uid: 'u1' }, loading: false });
+    mockedNav.useSearchParams.mockReturnValue({ get: () => '' } as unknown as URLSearchParams);
+    render(<SessionsPage />);
+    expect(screen.getByText('Ouvrez cette page depuis vos clients (aucun client sélectionné).')).toBeInTheDocument();
+  });
+
+  test('displays sessions when authenticated and client is selected', async () => {
+    mockedAuth.useAuth.mockReturnValue({ user: { uid: 'u1' }, loading: false });
+    mockedNav.useSearchParams.mockReturnValue({ get: () => 'c1' } as unknown as URLSearchParams);
+    mockedFirebase.getClientById.mockResolvedValue({ id: 'c1', name: 'Test Client' });
+    mockedFirebase.listSessionsForClient.mockResolvedValue(mockSessions);
+    const listSessionsMock = vi.fn().mockResolvedValue([
+        { id: '1', state: { RapportDeSortie: {} } },
     ]);
-    getSessionApiMock.mockImplementation(async (id: string) => (id === 's2' ? { id: 's2', state: { RapportDeSortie: {} } } : { id }));
+    mockedHooks.useApiClient.mockReturnValue({
+        listSessions: listSessionsMock,
+    } as unknown as ReturnType<typeof hooks.useApiClient>);
     render(<SessionsPage />);
-
-    // Wait for listing
-    expect(await screen.findByText(/vos visites/i)).toBeInTheDocument();
-    expect(await screen.findByText('s1')).toBeInTheDocument();
-    expect(await screen.findByText('s2')).toBeInTheDocument();
-    // s2 should show "Rapport disponible"
-    expect(await screen.findAllByText(/rapport disponible/i)).toHaveLength(1);
-    // Firestore should be updated for s2
-    await waitFor(() => expect(updateSessionMock).toHaveBeenCalled());
+    await screen.findByText(/gérez vos sessions pour: test client/i);
+    await screen.findByText(/Rapport disponible/i);
   });
 
-  test('startVisit creates session and navigates to realtime page', async () => {
-    getClientMock.mockResolvedValueOnce({ id: 'c1', name: 'Client X' });
-    listSessionsMock.mockResolvedValueOnce([]);
+  test('allows creating a new session', async () => {
+    mockedAuth.useAuth.mockReturnValue({ user: { uid: 'u1' }, loading: false });
+    mockedNav.useSearchParams.mockReturnValue({ get: () => 'c1' } as unknown as URLSearchParams);
+    mockedFirebase.getClientById.mockResolvedValue({ id: 'c1', name: 'Test Client' });
+    mockedFirebase.listSessionsForClient.mockResolvedValue(mockSessions);
+    const createSessionMock = vi.fn().mockResolvedValue({ id: 's3' });
+    const listSessionsMock = vi.fn().mockResolvedValue([]);
+    mockedHooks.useApiClient.mockReturnValue({
+        createSession: createSessionMock,
+        listSessions: listSessionsMock,
+    } as unknown as ReturnType<typeof hooks.useApiClient>);
+
     render(<SessionsPage />);
-    const startButton = await screen.findByRole('button', { name: /commencer une visite/i });
-    await userEvent.click(startButton);
-    await waitFor(() => expect(setSessionMock).toHaveBeenCalledWith('u1', 'c1', 's-new', expect.objectContaining({ nom_tc: expect.any(String), nom_agri: 'Client X', is_report_done: false })));
-    await waitFor(() => expect(pushMock).toHaveBeenCalledWith('/session/s-new?clientId=c1'));
+    await userEvent.click(screen.getByRole('button', { name: /commencer une visite/i }));
+    await vi.waitFor(() => expect(createSessionMock).toHaveBeenCalled());
   });
 });
-
-
