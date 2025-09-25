@@ -1,5 +1,5 @@
 "use client";
-import { useCallback } from 'react';
+import { useCallback, useMemo } from 'react';
 import type { Config, Result, Session, SessionDetails } from '../types';
 import { LogLevel } from '../types';
 import { buildHttpUrl } from '../utils';
@@ -28,7 +28,7 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
     }
   }, [baseUrl, addLog]);
 
-  return {
+  return useMemo(() => ({
     createSession: (initialState?: Record<string, unknown>) => performRequest<Session>('POST', `/apps/${config.appName}/users/${config.userId}/sessions`, initialState),
     createSessionWithId: (sessionId: string, initialState?: Record<string, unknown>) => performRequest<Session>('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`, initialState),
     listSessions: () => performRequest<Session[]>('GET', `/apps/${config.appName}/users/${config.userId}/sessions`),
@@ -36,5 +36,5 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
     deleteSession: (sessionId: string) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/delete`),
     ingestSessionMemoryFor: (sessionId: string, returnContext: boolean = false) =>
       performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`),
-  };
+  }), [performRequest, config.appName, config.userId]);
 }

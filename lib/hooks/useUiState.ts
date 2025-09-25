@@ -40,6 +40,9 @@ const initialState: UiState = {
   reconnectAttempts: 0,
   reportDetails: null,
   hasReport: false,
+  serverReady: false,
+  isListening: false,
+  isStreamingOn: false,
 };
 
 function reducer(state: UiState, action: Action): UiState {
@@ -47,7 +50,26 @@ function reducer(state: UiState, action: Action): UiState {
     case 'SHOW_CALL_SCREEN':
       return { ...state, isCallScreen: true, isConnecting: true };
     case 'RESET_CALL_STATE':
-      return { ...state, ...initialState };
+      return {
+        ...state,
+        isMicOn: false,
+        isMuted: false,
+        isThinking: false,
+        isSpeaking: false,
+        isWaitingForAgent: false,
+        isCallScreen: false,
+        isConnecting: false,
+        isDisconnecting: false,
+        isReconnecting: false,
+        isResuming: false,
+        hasResumed: false,
+        isMicHwOn: false,
+        wsConnected: false,
+        reconnectAttempts: 0,
+        serverReady: false,
+        isStreamingOn: false,
+        isListening: false,
+      };
     case 'SET_SERVER_READY':
       return { ...state, serverReady: action.payload, isConnecting: false };
     case 'SET_LISTENING':

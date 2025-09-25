@@ -1,5 +1,5 @@
 "use client";
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import type { SessionDetails } from '../types';
 import { useApiClient } from './useApiClient';
 import { getClientSessionDoc } from '../firebase';
@@ -8,6 +8,8 @@ export function useSessionReport(sessionId: string, clientId: string, user: { ui
   const [reportDetails, setReportDetails] = useState<SessionDetails | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
 
+  const noopLogger = useCallback(() => {}, []);
+
   const apiClient = useApiClient({
     scheme: (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss' : 'ws',
     host: 'env',
@@ -15,7 +17,9 @@ export function useSessionReport(sessionId: string, clientId: string, user: { ui
     appName: 'app',
     userId: clientId || 'user',
     sessionId: ''
-  }, () => {}); // Simplified logging
+  }, noopLogger); // Simplified logging
+
+  const getSession = useCallback((id: string) => apiClient.getSession(id), [apiClient]);
 
   React.useEffect(() => {
     if (!sessionId || !clientId) {
@@ -36,7 +40,7 @@ export function useSessionReport(sessionId: string, clientId: string, user: { ui
           }
         }
         // Fallback to backend
-        const result = await apiClient.getSession(sessionId);
+        const result = await getSession(sessionId);
         if(result.ok) {
             setReportDetails(result.value);
         }
@@ -45,7 +49,7 @@ export function useSessionReport(sessionId: string, clientId: string, user: { ui
         setReportLoading(false);
       }
     })().catch(() => setReportLoading(false));
-  }, [sessionId, clientId, user?.uid, apiClient]);
+  }, [sessionId, clientId, user?.uid, getSession]);
 
   return { reportDetails, reportLoading };
 }

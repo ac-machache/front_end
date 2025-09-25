@@ -24,6 +24,9 @@ describe('useUiState', () => {
       reconnectAttempts: 0,
       reportDetails: null,
       hasReport: false,
+      serverReady: false,
+      isListening: false,
+      isStreamingOn: false,
     });
   });
 
@@ -61,6 +64,9 @@ describe('useUiState', () => {
         reconnectAttempts: 0,
         reportDetails: null,
         hasReport: false,
+        serverReady: false,
+        isStreamingOn: false,
+        isListening: false,
     });
   });
 
