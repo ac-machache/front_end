@@ -281,6 +281,13 @@ export function useAudioProcessor(
 
   const startMic = useCallback(async () => {
     try {
+      // Always drop any stale buffered mic data before (re)starting
+      micChunkQueue.current = [];
+      // Ensure we don't have a lingering flush timer from a previous run
+      if (micFlushTimer.current != null) {
+        try { window.clearInterval(micFlushTimer.current); } catch {}
+        micFlushTimer.current = null;
+      }
       // Ensure player is initialized
       if (!playerContext.current) {
         const playerModulePath = '/js/audio-player.js';
@@ -359,14 +366,32 @@ export function useAudioProcessor(
   }, [addLog, onMicData, onLevel, onPlaybackDrained]);
 
   const stopMic = useCallback(() => {
-    if (recorderNode.current) { recorderNode.current.disconnect(); recorderNode.current = null; }
-    if (micStreamRef.current) { micStreamRef.current.getTracks().forEach(t => t.stop()); micStreamRef.current = null; }
-    if (audioPlayerNode.current) { audioPlayerNode.current.disconnect(); audioPlayerNode.current = null; }
-    if (micFlushTimer.current != null) { window.clearInterval(micFlushTimer.current); micFlushTimer.current = null; }
+    // Detach worklet/script callbacks first to prevent further queueing
+    try {
+      const node: unknown = recorderNode.current as unknown;
+      // AudioWorkletNode has .port.onmessage
+      const asWorklet = node as { port?: { onmessage?: unknown } };
+      if (asWorklet && asWorklet.port) { asWorklet.port.onmessage = undefined; }
+      // ScriptProcessorNode fallback has .onaudioprocess
+      const asScript = node as { onaudioprocess?: unknown };
+      if (asScript && typeof asScript.onaudioprocess !== 'undefined') { asScript.onaudioprocess = undefined as unknown as (e: unknown) => void; }
+    } catch {}
+
+    // Disconnect nodes and stop input tracks
+    try { recorderNode.current?.disconnect(); } catch {}
+    recorderNode.current = null;
+    try { micStreamRef.current?.getTracks().forEach(t => t.stop()); } catch {}
+    micStreamRef.current = null;
+    try { audioPlayerNode.current?.disconnect(); } catch {}
+    audioPlayerNode.current = null;
+
+    // Stop timers and clear any buffered data
+    if (micFlushTimer.current != null) { try { window.clearInterval(micFlushTimer.current); } catch {} micFlushTimer.current = null; }
     micChunkQueue.current = [];
 
-    // Do not aggressively close the contexts. Instead, nullify them and let
-    // the browser's garbage collector handle cleanup gracefully. This prevents crashes.
+    // Proactively close AudioContexts to terminate worklets and avoid zombie processing
+    try { void recorderContext.current?.close(); } catch {}
+    try { void playerContext.current?.close(); } catch {}
     recorderContext.current = null;
     playerContext.current = null;
   }, []);

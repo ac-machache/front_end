@@ -748,6 +748,10 @@ export default function SessionDetail() {
           level01={lastLevelRef.current}
           onDisconnect={async () => {
                       setUiState(prev => ({ ...prev, isDisconnecting: true }));
+            // Immediately stop mic and disable streaming to avoid any residual buffers
+            try { setStreamingEnabled(false); } catch {}
+            try { stopMic(); } catch {}
+            try { clearPlaybackQueue(); } catch {}
                       try { sendMessageRef.current({ event: 'client_disconnect', intent: 'manual' }); } catch {}
                       disconnectRef.current();
             setSessionStarted(false);
