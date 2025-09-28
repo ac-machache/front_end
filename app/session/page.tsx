@@ -2,17 +2,23 @@
 import React, { useCallback, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import type { Session, SessionDetails, SessionState, Result } from '@/lib/types';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/components/ui/card';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar } from '@/components/ui/calendar';
+import { Label } from '@/components/ui/label';
+import type { Session, SessionDetails, SessionState, Result, ClientRecord } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
 import { useApiClient } from '@/lib/hooks';
-import { Loader2 } from 'lucide-react';
+import { Loader2, ChevronDownIcon } from 'lucide-react';
+import { CalendarDownSolid } from '@mynaui/icons-react';
+import { cn } from '@/lib/utils';
+import { format } from 'date-fns';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { getClientById, listSessionsForClient, setClientSessionDoc, updateClientSessionDoc, deleteClientSessionDoc } from '@/lib/firebase';
 import { ChevronRightCircleSolid, BookOpenSolid, ChatPlusSolid, RefreshAltSolid, PanelRightOpenSolid, TrashOneSolid, BookImageSolid } from '@mynaui/icons-react';
 import Link from 'next/link';
 
-type ClientDoc = { id: string; name?: string; email?: string };
+type ClientDoc = Pick<ClientRecord, 'id' | 'name' | 'email' | 'contexte'>;
 
 function SessionsPageInner() {
   const router = useRouter();
@@ -26,9 +32,11 @@ function SessionsPageInner() {
   // États UI (anciens)
   const [isListing, setIsListing] = React.useState(false);
   const [isCreating, setIsCreating] = React.useState(false);
+  const [visitDate, setVisitDate] = React.useState<Date | undefined>(undefined);
+  const [isDatePickerOpen, setIsDatePickerOpen] = React.useState(false);
 
   // Liste des sessions: maintenant stockée dans Firestore (sessions du client)
-  const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; is_report_done?: boolean; saved?: boolean }>>([]);
+  const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; name?: string; is_report_done?: boolean; saved?: boolean }>>([]);
   const [reportReadyById, setReportReadyById] = React.useState<Record<string, boolean>>({});
   const [displayLabelsById, setDisplayLabelsById] = React.useState<Record<string, { title: string; subtitle?: string }>>({});
 
@@ -74,75 +82,42 @@ function SessionsPageInner() {
     try {
       // Récupérer client (nom pour nom_agri)
       const c = await getClientById(user.uid, clientId);
-      setClientDoc(c as ClientDoc);
+      if (c) {
+        setClientDoc({
+          id: c.id,
+          name: typeof c.name === 'string' ? c.name : '',
+          email: typeof c.email === 'string' ? c.email : '',
+          contexte: typeof c.contexte === 'string' ? c.contexte : '',
+        });
+      } else {
+        setClientDoc(null);
+      }
 
       // Récupérer les sessions du client depuis Firestore
       const list = await listSessionsForClient(user.uid, clientId);
-      const minimal = (list as Array<{ id: string; is_report_done?: boolean; saved?: boolean }>).map((d) => ({
+      const minimal = (list as Array<{ id: string; name?: string; is_report_done?: boolean; saved?: boolean }>).map((d) => ({
         id: d.id,
+        name: typeof d.name === 'string' ? d.name : undefined,
         is_report_done: d.is_report_done ?? false,
         saved: d.saved ?? false,
       }));
       setFirestoreSessions(minimal);
 
-      // Récupérer la liste des sessions depuis le backend (un seul appel)
-      const backendList = await listSessionsRef.current();
-      const backendById: Record<string, SessionDetails> = {};
-      if (backendList.ok) {
-        for (const s of backendList.value) {
-          backendById[s.id] = s;
-        }
-      }
-      // Vérifier l'état réel côté backend et préparer mises à jour Firestore
-      const checks = minimal.map((s) => {
-        const details = backendById[s.id];
-        const report = (details?.state as unknown as { RapportDeSortie?: unknown })?.RapportDeSortie;
-        const ready = !!report;
-        return { id: s.id, ready, report } as { id: string; ready: boolean; report?: unknown };
-      });
-
-      // Mettre à jour les docs Firestore si un rapport est devenu prêt (+ ReportKey)
-      await Promise.allSettled(
-        checks
-          .filter((chk) => chk.ready)
-          .map((chk) => updateClientSessionDoc(user.uid!, clientId, chk.id, { is_report_done: true, ReportKey: chk.report ?? null }))
-      );
-
-      // Recharger depuis Firestore après mises à jour pour refléter is_report_done/saved au plus juste
-      try {
-        const relist = await listSessionsForClient(user.uid, clientId);
-        const relistMinimal = (relist as Array<{ id: string; is_report_done?: boolean; saved?: boolean }>).
-          map((d) => ({ id: d.id, is_report_done: d.is_report_done ?? false, saved: d.saved ?? false }));
-        setFirestoreSessions(relistMinimal);
-      } catch {}
-
       const nextStatusMap: Record<string, boolean> = {};
       const nextLabelsMap: Record<string, { title: string; subtitle?: string }> = {};
-      if (backendList.ok) {
-        for (const s of backendList.value) {
-          const state = (s?.state as SessionState | undefined);
-          const main = state?.RapportDeSortie?.main_report;
-        const title = (typeof main?.title === 'string' && main.title.trim() !== '')
-          ? main.title
-          : (typeof main?.farmer === 'string' && main.farmer.trim() !== '')
-            ? main.farmer
-            : (typeof state?.nom_agri === 'string' && state.nom_agri.trim() !== '')
-              ? state.nom_agri
-              : (c?.name || s.id);
-        const dateRaw = (typeof main?.date_of_visit === 'string' && main.date_of_visit.trim() !== '')
-          ? main.date_of_visit
-          : (typeof s?.lastUpdateTime === 'string' ? s.lastUpdateTime : undefined);
-        let dateFormatted: string | undefined;
-        try { dateFormatted = dateRaw ? new Date(dateRaw).toLocaleString() : undefined; } catch {}
-        const subtitleParts: string[] = [];
-        if (dateFormatted) subtitleParts.push(dateFormatted);
-        if (typeof state?.nom_tc === 'string' && state.nom_tc.trim() !== '') subtitleParts.push(state.nom_tc);
-        const subtitle = subtitleParts.join(' · ');
-        nextLabelsMap[s.id] = { title, subtitle: subtitle || undefined };
+      for (const session of minimal) {
+        const ready = session.is_report_done ?? false;
+        nextStatusMap[session.id] = ready;
 
-        const ready = !!state?.RapportDeSortie;
-        nextStatusMap[s.id] = ready;
-        }
+        const subtitleParts: string[] = [];
+        if (ready) subtitleParts.push('Rapport disponible');
+        if (session.saved) subtitleParts.push('Sauvegardée');
+        if (!ready) subtitleParts.push('En cours…');
+
+        nextLabelsMap[session.id] = {
+          title: session.name || c?.name || session.id,
+          subtitle: subtitleParts.join(' • '),
+        };
       }
       setReportReadyById(nextStatusMap);
       setDisplayLabelsById(nextLabelsMap);
@@ -161,13 +136,32 @@ function SessionsPageInner() {
   // 1) créer la session côté backend avec userId = clientId
   // 2) stocker la session dans Firestore: users/{uid}/clients/{clientId}/sessions/{sessionId}
   const startVisit = React.useCallback(async () => {
-    if (!user || !clientId) return;
+    if (!user || !clientId || !visitDate) return;
     setIsCreating(true);
     try {
-      const nom_tc = user.displayName || user.email || 'Utilisateur';
-      const nom_agri = clientDoc?.name || 'Client';
+      let clientForSession = clientDoc;
+      if (!clientForSession) {
+        const fetched = await getClientById(user.uid, clientId);
+        if (fetched) {
+          clientForSession = {
+            id: fetched.id,
+            name: typeof fetched.name === 'string' ? fetched.name : '',
+            email: typeof fetched.email === 'string' ? fetched.email : '',
+            contexte: typeof fetched.contexte === 'string' ? fetched.contexte : '',
+          };
+          setClientDoc(clientForSession);
+        }
+      }
 
-      const result = await apiClient.createSession({ nom_tc, nom_agri });
+      const nom_tc = user.displayName || user.email || 'Utilisateur';
+      const nom_agri = clientForSession?.name || 'Client';
+      const contexte_client = clientForSession?.contexte ?? '';
+
+      const date_de_visite = format(visitDate, 'dd/MM/yyyy');
+
+      const payload = { nom_tc, nom_agri, contexte_client, date_de_visite };
+      addLog(LogLevel.Event, 'Creating session', payload);
+      const result = await apiClient.createSession(payload);
       if (result.ok) {
         // Enregistrer la session dans Firestore sous le même ID (en arrière-plan)
         setClientSessionDoc(
@@ -180,11 +174,12 @@ function SessionsPageInner() {
           .catch((err) => { addLog(LogLevel.Error, 'Failed to persist session to Firestore', err); });
         // Aller immédiatement au temps réel
         router.push(`/session/${result.value.id}?clientId=${clientId}`);
+        setVisitDate(undefined);
       }
     } finally {
       setIsCreating(false);
     }
-  }, [user, clientId, clientDoc, apiClient, addLog, router, refreshSessions]);
+  }, [user, clientId, clientDoc, apiClient, addLog, router, refreshSessions, visitDate]);
 
 
   // États de garde UI
@@ -214,27 +209,61 @@ function SessionsPageInner() {
           <Card>
             <CardHeader>
               <CardTitle>Démarrer une visite</CardTitle>
+              <CardDescription>Choisissez la date de votre visite puis lancez la session.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="space-y-3">
-                <Button className="w-full h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white" disabled={isCreating} onClick={startVisit}>
-                  {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChatPlusSolid />}
-                  {isCreating ? 'Démarrage…' : 'Commencer une Visite'}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+              <div className="flex flex-col items-center gap-3">
+                <div className="space-y-2">
+                  
+                   <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                     <PopoverTrigger asChild>
+                       <Button
+                         id="visit-date"
+                         variant="default"
+                         className={cn('h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto justify-center')}
+                       >
+                         <CalendarDownSolid className="h-4 w-4" />
+                         {visitDate ? format(visitDate, 'dd/MM/yyyy') : 'Sélectionnez une date'}
+                       </Button>
+                     </PopoverTrigger>
+                     <PopoverContent className="w-auto p-0 overflow-hidden" align="start">
+                       <Calendar
+                         mode="single"
+                         selected={visitDate}
+                         captionLayout="dropdown"
+                         onSelect={(date) => {
+                           setVisitDate(date ?? undefined);
+                           if (date) setIsDatePickerOpen(false);
+                         }}
+                         initialFocus
+                       />
+                     </PopoverContent>
+                   </Popover>
+                 </div>
+                 <Button
+                   className="h-10 px-5 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto"
+                   disabled={isCreating || !visitDate}
+                   onClick={startVisit}
+                 >
+                   {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChatPlusSolid />}
+                   {isCreating ? 'Démarrage…' : 'Commencer la visite'}
+                 </Button>
+               </div>
+             </CardContent>
+           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Vos visites</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-3">
-                <Button className="w-full h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white" disabled={isListing} onClick={refreshSessions}>
-                  {isListing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshAltSolid />}
-                  {isListing ? 'Chargement…' : 'Actualiser la liste'}
-                </Button>
+           <Card>
+             <CardHeader>
+               <CardTitle>Vos visites</CardTitle>
+             </CardHeader>
+             <CardContent>
+               <div className="space-y-3">
+                <div className="flex justify-center">
+                  <Button className="h-10 px-5 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto" disabled={isListing} onClick={refreshSessions}>
+                    {isListing ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshAltSolid />}
+                    {isListing ? 'Chargement…' : 'Actualiser la liste'}
+                  </Button>
+                </div>
 
                 <div className="space-y-2">
                   {Array.isArray(firestoreSessions) && firestoreSessions.length > 0 ? (
@@ -251,8 +280,7 @@ function SessionsPageInner() {
                         <div className="min-w-0">
                           <div className="text-sm font-medium truncate">{displayLabelsById[s.id]?.title || clientDoc?.name || s.id}</div>
                           <div className="text-xs text-muted-foreground truncate">
-                            {displayLabelsById[s.id]?.subtitle ? `${displayLabelsById[s.id]?.subtitle} • ` : ''}
-                            {reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'}{s.saved ? ' • Sauvegardée' : ''}
+                            {displayLabelsById[s.id]?.subtitle ?? (reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…')}
                           </div>
                         </div>
                         <div className="flex items-center gap-3 md:gap-2" role="group" aria-label="Actions de session">

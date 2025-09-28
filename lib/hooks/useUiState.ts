@@ -19,7 +19,8 @@ type Action =
   | { type: 'SET_IS_DISCONNECTING'; payload: boolean }
   | { type: 'SET_REPORT_DETAILS'; payload: SessionDetails | null }
   | { type: 'SET_HAS_REPORT'; payload: boolean }
-  | { type: 'SET_IS_ONLINE'; payload: boolean };
+  | { type: 'SET_IS_ONLINE'; payload: boolean }
+  | { type: 'SET_IS_GENERATING_REPORT'; payload: boolean };
 
 const initialState: UiState = {
   isMicOn: false,
@@ -43,6 +44,7 @@ const initialState: UiState = {
   serverReady: false,
   isListening: false,
   isStreamingOn: false,
+  isGeneratingReport: false,
 };
 
 function reducer(state: UiState, action: Action): UiState {
@@ -100,6 +102,8 @@ function reducer(state: UiState, action: Action): UiState {
         return { ...state, hasReport: action.payload };
     case 'SET_IS_ONLINE':
         return { ...state, isOnline: action.payload };
+    case 'SET_IS_GENERATING_REPORT':
+        return { ...state, isGeneratingReport: action.payload };
     default:
       return state;
   }

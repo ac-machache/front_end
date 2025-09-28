@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { addClientForUser, listClientsForUser } from '@/lib/firebase';
-import type { ClientRecord } from '@/lib/types';
+import type { ClientRecord, ClientFormValues } from '@/lib/types';
 import { Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -23,7 +24,9 @@ export default function ClientsPage() {
   const [isAdding, setIsAdding] = React.useState(false);
   const [newName, setNewName] = React.useState('');
   const [newEmail, setNewEmail] = React.useState('');
-  const [newNotes, setNewNotes] = React.useState('');
+  const [newCity, setNewCity] = React.useState('');
+  const [newZipCode, setNewZipCode] = React.useState('');
+  const [newContexte, setNewContexte] = React.useState('');
 
   const refresh = React.useCallback(async () => {
     if (!user) { setClients([]); return; }
@@ -40,13 +43,23 @@ export default function ClientsPage() {
   React.useEffect(() => { refresh(); }, [refresh]);
 
   const onAdd = async () => {
-    if (!user || !newName.trim()) return;
+    if (!user) return;
+    const form: ClientFormValues = {
+      name: newName.trim(),
+      email: newEmail.trim(),
+      city: newCity.trim(),
+      zipCode: newZipCode.trim(),
+      contexte: newContexte.trim(),
+    };
+    if (Object.values(form).some((value) => !value)) return;
     setIsAdding(true);
     try {
-      await addClientForUser(user.uid, { name: newName.trim(), email: newEmail.trim(), notes: newNotes.trim() || undefined });
+      await addClientForUser(user.uid, form);
       setNewName('');
       setNewEmail('');
-      setNewNotes('');
+      setNewCity('');
+      setNewZipCode('');
+      setNewContexte('');
       await refresh();
     } finally {
       setIsAdding(false);
@@ -89,12 +102,37 @@ export default function ClientsPage() {
               <Label htmlFor="clientEmail">E‑mail</Label>
               <Input id="clientEmail" type="email" value={newEmail} onChange={(e) => setNewEmail(e.target.value)} className="mt-1" placeholder="client@email.com" />
             </div>
-            <div className="md:col-span-2">
-              <Label htmlFor="clientNotes">Notes</Label>
-              <Input id="clientNotes" value={newNotes} onChange={(e) => setNewNotes(e.target.value)} className="mt-1" placeholder="Notes (optionnel)" />
+            <div className="md:col-span-1">
+              <Label htmlFor="clientCity">Ville</Label>
+              <Input id="clientCity" value={newCity} onChange={(e) => setNewCity(e.target.value)} className="mt-1" placeholder="Ville" />
             </div>
-            <div className="md:col-span-3">
-              <Button onClick={onAdd} disabled={isAdding || !newName.trim() || !newEmail.trim()} className="w-full sm:w-auto rounded-full h-10 px-4 gap-2">
+            <div className="md:col-span-1">
+              <Label htmlFor="clientZipCode">Code postal</Label>
+              <Input id="clientZipCode" value={newZipCode} onChange={(e) => setNewZipCode(e.target.value)} className="mt-1" placeholder="Code postal" />
+            </div>
+            <div className="md:col-span-4">
+              <Label htmlFor="clientContexte">Contexte</Label>
+              <Textarea
+                id="clientContexte"
+                value={newContexte}
+                onChange={(e) => setNewContexte(e.target.value)}
+                className="mt-1 min-h-40"
+                placeholder={`Client : GAEC des Prairies\nExploitant : Sarah Lefèvre\nSuperficie : 60 ha de prairie permanente et maïs ensilage.\nActivité : élevage de 50 vaches laitières.\nParticularités : système fourrager autonome, production de foin.`}
+              />
+            </div>
+            <div className="md:col-span-4 flex justify-center">
+              <Button
+                onClick={onAdd}
+                disabled={
+                  isAdding ||
+                  !newName.trim() ||
+                  !newEmail.trim() ||
+                  !newCity.trim() ||
+                  !newZipCode.trim() ||
+                  !newContexte.trim()
+                }
+                className="rounded-full h-10 px-6 gap-2"
+              >
                 {isAdding ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlusSolid />}
                 Ajouter
               </Button>
@@ -111,7 +149,10 @@ export default function ClientsPage() {
               <CardDescription>{c.email}</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="text-sm text-muted-foreground whitespace-pre-wrap">{c.notes || '—'}</div>
+              <div className="text-sm text-muted-foreground whitespace-pre-wrap space-y-1">
+                <div>{`${c.zipCode} ${c.city}`}</div>
+                <div className="pt-2">{c.contexte || '—'}</div>
+              </div>
             </CardContent>
             <CardFooter>
               <Button asChild size="sm" className="rounded-full h-9 px-3 gap-2">

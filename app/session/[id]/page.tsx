@@ -21,11 +21,12 @@ import {
   AUDIO_CONSTANTS
 } from '@/lib/hooks';
 import { useSearchParams } from 'next/navigation';
-import { TelephoneSolid } from '@mynaui/icons-react';
-import { PanelRightOpenSolid } from '@mynaui/icons-react';
+import { TelephoneSolid, PanelRightOpenSolid, BookmarkSolid } from '@mynaui/icons-react';
 import { routeWsMessage } from '@/lib/wsRouter';
 import { buildWebSocketUrl } from '@/lib/utils';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { getClientById, updateClientSessionDoc } from '@/lib/firebase';
+import { Spinner } from '@/components/ui/shadcn-io/spinner';
 
 export default function SessionDetail() {
   const params = useParams<{ id: string }>();
@@ -36,7 +37,9 @@ export default function SessionDetail() {
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
 
   const { state: uiState, dispatch } = useUiState();
-  const { reportDetails, reportLoading } = useSessionReport(params.id!, clientIdParam, user);
+  const { reportDetails, reportLoading, refetch: refetchReport } = useSessionReport(params.id!, clientIdParam, user);
+  const [clientMeta, setClientMeta] = React.useState<{ city?: string; zipCode?: string } | null>(null);
+  const generatingOverlayRef = React.useRef<HTMLDivElement | null>(null);
 
   const lastHeartbeatAtRef = useRef<number>(Date.now());
   const lastWsMessageAtRef = useRef<number>(Date.now());
@@ -51,7 +54,7 @@ export default function SessionDetail() {
   const { addLog } = useLogger();
 
   // Backend API client for report fetching (userId is the clientId)
-  useApiClient({
+  const apiClient = useApiClient({
     scheme: (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss' : 'ws',
     host: 'env',
     port: '0',
@@ -390,6 +393,24 @@ export default function SessionDetail() {
     graceMs: AUDIO_CONSTANTS.VISIBILITY_GRACE_MS
   });
 
+  React.useEffect(() => {
+    const fetchClientMeta = async () => {
+      if (!user?.uid || !clientIdParam) return;
+      try {
+        const clientDoc = await getClientById(user.uid, clientIdParam);
+        if (clientDoc) {
+          setClientMeta({
+            city: typeof clientDoc.city === 'string' ? clientDoc.city : undefined,
+            zipCode: typeof clientDoc.zipCode === 'string' ? clientDoc.zipCode : undefined,
+          });
+        }
+      } catch (err) {
+        addLog(LogLevel.Error, 'Failed to load client metadata', err);
+      }
+    };
+    fetchClientMeta();
+  }, [user?.uid, clientIdParam, addLog]);
+
   // Reset to idle when mic state changes
   React.useEffect(() => {
     sessionMode.resetToIdle();
@@ -400,7 +421,68 @@ export default function SessionDetail() {
     if (wsStatus === WsStatus.Disconnected) dispatch({ type: 'SET_IS_DISCONNECTING', payload: false });
   }, [wsStatus, dispatch]);
 
-  const hasReport = !!reportDetails?.state?.RapportDeSortie;
+  const reportContent = reportDetails?.state?.RapportDeSortie;
+  const hasReport = !!reportContent && Object.keys(reportContent as Record<string, unknown>).length > 0;
+
+  const notifyReportReady = useCallback(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    const openReport = () => {
+      const targetUrl = `${window.location.origin}/session/${params.id}?clientId=${clientIdParam}`;
+      window.focus();
+      if (window.location.href !== targetUrl) {
+        window.location.href = targetUrl;
+      }
+    };
+    const createNotification = () => {
+      const notification = new Notification('Rapport généré', {
+        body: "Cliquez pour consulter le rapport finalisé.",
+        tag: `report-${params.id}`,
+      });
+      notification.onclick = () => {
+        openReport();
+        notification.close();
+      };
+    };
+    if (Notification.permission === 'granted') {
+      createNotification();
+    } else if (Notification.permission !== 'denied') {
+      Notification.requestPermission().then((permission) => {
+        if (permission === 'granted') createNotification();
+      }).catch(() => {});
+    }
+  }, [clientIdParam, params.id]);
+
+  const triggerReportGeneration = React.useCallback(async () => {
+    if (!params.id || !user?.uid || !clientIdParam) return;
+    dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: true });
+    try {
+      const response = await apiClient.generateReport(params.id as string, {
+        ville: clientMeta?.city ?? null,
+        zip_code: clientMeta?.zipCode ?? null,
+        current_document_path: `technico/${user.uid}/clients/${clientIdParam}/sessions/${params.id}`,
+      });
+
+      if (response.ok && (response.value as { result?: unknown })?.result) {
+        const structured = (response.value as { result: unknown }).result as Record<string, unknown>;
+        if (!structured || typeof structured !== 'object' || !('main_report' in structured) || !('strategic_dashboard' in structured)) {
+          console.warn('Report payload missing expected keys.', structured);
+        } else {
+          await updateClientSessionDoc(user.uid, clientIdParam, params.id as string, {
+            ReportKey: structured,
+            is_report_done: true,
+          });
+          await refetchReport();
+          notifyReportReady();
+        }
+      } else {
+        console.warn('Report generation completed without usable result.', response);
+      }
+    } catch (err) {
+      addLog(LogLevel.Error, 'Failed to request report generation', err);
+    } finally {
+      dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: false });
+    }
+  }, [apiClient, params.id, clientMeta?.city, clientMeta?.zipCode, user?.uid, clientIdParam, addLog, dispatch, refetchReport, notifyReportReady]);
 
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
@@ -420,21 +502,45 @@ export default function SessionDetail() {
         ) : hasReport ? (
         <ReportDisplay reportDetails={reportDetails} reportLoading={reportLoading} />
       ) : (
-        <div className="mt-10 flex flex-col items-center justify-center gap-6">
-          <p className="text-sm text-muted-foreground text-center max-w-xl">
+        <div className="relative mt-10 flex flex-col items-center justify-center gap-6 min-h-[220px]">
+          {uiState.isGeneratingReport && (
+            <div ref={generatingOverlayRef} className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-[32px] bg-background/80 backdrop-blur-md">
+              <Spinner variant="ellipsis" className="text-white" size={48} />
+              <span className="text-sm text-muted-foreground">Génération du rapport…</span>
+            </div>
+          )}
+          <p className={`text-sm text-muted-foreground text-center max-w-xl transition-opacity ${uiState.isGeneratingReport ? 'opacity-40' : 'opacity-100'}`}>
             Aucun rapport n’est disponible pour cette session. Si votre visite est terminée, vous pouvez la finaliser. Sinon, lancez un appel pour continuer en temps réel.
           </p>
-                  <Button
-            size="lg"
-            className="h-12 px-6 rounded-full text-base"
-            onClick={() => {
-              dispatch({ type: 'SHOW_CALL_SCREEN' });
-              safeManualConnect();
-            }}
-          >
-            <TelephoneSolid className="mr-2" />
-            {uiState.isConnecting ? 'Connexion…' : 'Démarrer l’appel'}
-          </Button>
+          <div className={`flex flex-col items-center gap-3 transition-opacity ${uiState.isGeneratingReport ? 'opacity-40' : 'opacity-100'}`} aria-hidden={uiState.isGeneratingReport}>
+            <Button
+              size="lg"
+              className="inline-flex items-center justify-center h-12 px-6 gap-2 rounded-full text-base"
+              onClick={() => {
+                dispatch({ type: 'SHOW_CALL_SCREEN' });
+                safeManualConnect();
+              }}
+            >
+              <TelephoneSolid />
+              <span>{uiState.isConnecting ? 'Connexion…' : 'Démarrer l’appel'}</span>
+            </Button>
+            <Button
+              size="lg"
+              className="relative inline-flex items-center justify-center h-12 px-6 gap-2 rounded-full text-base"
+              disabled={uiState.isGeneratingReport}
+              onClick={triggerReportGeneration}
+            >
+              {uiState.isGeneratingReport && (
+                <span className="absolute inset-0 flex items-center justify-center">
+                  <Spinner variant="ellipsis" className="text-white" />
+                </span>
+              )}
+              <span className={uiState.isGeneratingReport ? 'opacity-0' : 'inline-flex items-center gap-2'}>
+                <BookmarkSolid />
+                <span>Finaliser la visite</span>
+              </span>
+            </Button>
+          </div>
         </div>
       )}
 

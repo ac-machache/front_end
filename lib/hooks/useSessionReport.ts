@@ -21,35 +21,36 @@ export function useSessionReport(sessionId: string, clientId: string, user: { ui
 
   const getSession = useCallback((id: string) => apiClient.getSession(id), [apiClient]);
 
-  React.useEffect(() => {
+  const refetch = useCallback(async () => {
     if (!sessionId || !clientId) {
       setReportDetails(null);
       return;
     }
 
     setReportLoading(true);
-    (async () => {
-      try {
-        // Prefer Firestore ReportKey if present (requires user.uid)
-        if (user?.uid) {
-          const fsDoc = await getClientSessionDoc(user.uid, clientId, sessionId);
-          const reportKey = fsDoc?.ReportKey;
-          if (reportKey) {
-            setReportDetails({ id: sessionId, state: { RapportDeSortie: reportKey } });
-            return;
-          }
+    try {
+      // Prefer Firestore ReportKey if present (requires user.uid)
+      if (user?.uid) {
+        const fsDoc = await getClientSessionDoc(user.uid, clientId, sessionId);
+        const reportKey = fsDoc?.ReportKey;
+        if (reportKey) {
+          setReportDetails({ id: sessionId, state: { RapportDeSortie: reportKey } });
+          return;
         }
-        // Fallback to backend
-        const result = await getSession(sessionId);
-        if(result.ok) {
-            setReportDetails(result.value);
-        }
-
-      } finally {
-        setReportLoading(false);
       }
-    })().catch(() => setReportLoading(false));
+      // Fallback to backend
+      const result = await getSession(sessionId);
+      if (result.ok) {
+        setReportDetails(result.value);
+      }
+    } finally {
+      setReportLoading(false);
+    }
   }, [sessionId, clientId, user?.uid, getSession]);
 
-  return { reportDetails, reportLoading };
+  React.useEffect(() => {
+    void refetch();
+  }, [refetch]);
+
+  return { reportDetails, reportLoading, refetch };
 }

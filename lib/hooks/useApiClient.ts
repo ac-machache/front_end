@@ -36,5 +36,7 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
     deleteSession: (sessionId: string) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/delete`),
     ingestSessionMemoryFor: (sessionId: string, returnContext: boolean = false) =>
       performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`),
+    generateReport: (sessionId: string, payload?: Record<string, unknown>) =>
+      performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/generate-report`, payload),
   }), [performRequest, config.appName, config.userId]);
 }

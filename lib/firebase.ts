@@ -61,7 +61,7 @@ export function getDb(): Firestore | null {
 export async function listClientsForUser(userId: string): Promise<DocumentData[]> {
   const db = getDb();
   if (!db) return [];
-  const col = collection(db, 'users', userId, 'clients');
+  const col = collection(db, 'technico', userId, 'clients');
   const snap = await getDocs(col);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
@@ -75,10 +75,18 @@ function pruneUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out as Partial<T>;
 }
 
-export async function addClientForUser(userId: string, data: { name: string; email: string; notes?: string }): Promise<string | null> {
+export interface ClientPayload {
+  name: string;
+  email: string;
+  city: string;
+  zipCode: string;
+  contexte: string;
+}
+
+export async function addClientForUser(userId: string, data: ClientPayload): Promise<string | null> {
   const db = getDb();
   if (!db) return null;
-  const col = collection(db, 'users', userId, 'clients');
+  const col = collection(db, 'technico', userId, 'clients');
   const payload = pruneUndefined({ ...data, createdAt: serverTimestamp() });
   const docRef = await addDoc(col, payload);
   return docRef.id ?? null;
@@ -91,7 +99,7 @@ export type BasicUser = { uid: string; email?: string | null; displayName?: stri
 export async function ensureUserInitialized(user: BasicUser, options?: { nameOverride?: string }): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const userRef = doc(db, 'users', user.uid);
+  const userRef = doc(db, 'technico', user.uid);
   const snap = await getDoc(userRef);
   if (!snap.exists()) {
     await setDoc(userRef, pruneUndefined({
@@ -108,7 +116,7 @@ export async function ensureUserInitialized(user: BasicUser, options?: { nameOve
 export async function getClientById(userId: string, clientId: string): Promise<(DocumentData & { id: string }) | null> {
   const db = getDb();
   if (!db) return null;
-  const clientRef = doc(db, 'users', userId, 'clients', clientId);
+  const clientRef = doc(db, 'technico', userId, 'clients', clientId);
   const snap = await getDoc(clientRef);
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as DocumentData & { id: string };
@@ -117,7 +125,7 @@ export async function getClientById(userId: string, clientId: string): Promise<(
 export async function listSessionsForClient(userId: string, clientId: string): Promise<DocumentData[]> {
   const db = getDb();
   if (!db) return [];
-  const col = collection(db, 'users', userId, 'clients', clientId, 'sessions');
+  const col = collection(db, 'technico', userId, 'clients', clientId, 'sessions');
   const snap = await getDocs(col);
   return snap.docs.map(d => ({ id: d.id, ...d.data() }));
 }
@@ -129,7 +137,7 @@ export async function getClientSessionDoc(
 ): Promise<(DocumentData & { id: string }) | null> {
   const db = getDb();
   if (!db) return null;
-  const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'sessions', sessionId);
   const snap = await getDoc(ref);
   if (!snap.exists()) return null;
   return { id: snap.id, ...snap.data() } as DocumentData & { id: string };
@@ -144,7 +152,7 @@ export async function setClientSessionDoc(
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'sessions', sessionId);
   const payload = pruneUndefined({ saved: false, ...data, createdAt: serverTimestamp() });
   await setDoc(ref, payload);
 }
@@ -157,7 +165,7 @@ export async function updateClientSessionDoc(
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'sessions', sessionId);
   await setDoc(ref, pruneUndefined(data), { merge: true });
 }
 
@@ -168,7 +176,7 @@ export async function deleteClientSessionDoc(
 ): Promise<void> {
   const db = getDb();
   if (!db) return;
-  const ref = doc(db, 'users', userId, 'clients', clientId, 'sessions', sessionId);
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'sessions', sessionId);
   await deleteDoc(ref);
 }
 

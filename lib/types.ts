@@ -111,9 +111,19 @@ export interface ClientRecord {
   id: string;
   name: string;
   email: string;
-  notes?: string;
+  city: string;
+  zipCode: string;
+  contexte: string;
   createdAt?: unknown;
 }
+
+export type ClientFormValues = {
+  name: string;
+  email: string;
+  city: string;
+  zipCode: string;
+  contexte: string;
+};
 
 export interface ClientSessionRecord {
   id: string;
@@ -158,4 +168,5 @@ export interface UiState {
     serverReady?: boolean;
     isListening?: boolean;
     isStreamingOn?: boolean;
+    isGeneratingReport?: boolean;
   }
