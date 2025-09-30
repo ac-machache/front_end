@@ -518,6 +518,8 @@ export default function SessionDetail() {
               className="inline-flex items-center justify-center h-12 px-6 gap-2 rounded-full text-base"
               onClick={() => {
                 dispatch({ type: 'SHOW_CALL_SCREEN' });
+                pendingConnectedSoundRef.current = true;
+                connectedSoundPlayedRef.current = false;
                 safeManualConnect();
               }}
             >

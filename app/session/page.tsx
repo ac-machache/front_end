@@ -6,6 +6,7 @@ import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '@/com
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { Session, SessionDetails, SessionState, Result, ClientRecord } from '@/lib/types';
 import { LogLevel } from '@/lib/types';
 import { useApiClient } from '@/lib/hooks';
@@ -34,6 +35,7 @@ function SessionsPageInner() {
   const [isCreating, setIsCreating] = React.useState(false);
   const [visitDate, setVisitDate] = React.useState<Date | undefined>(undefined);
   const [isDatePickerOpen, setIsDatePickerOpen] = React.useState(false);
+  const [sessionType, setSessionType] = React.useState<string>('');
 
   // Liste des sessions: maintenant stockée dans Firestore (sessions du client)
   const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; name?: string; is_report_done?: boolean; saved?: boolean }>>([]);
@@ -136,7 +138,7 @@ function SessionsPageInner() {
   // 1) créer la session côté backend avec userId = clientId
   // 2) stocker la session dans Firestore: users/{uid}/clients/{clientId}/sessions/{sessionId}
   const startVisit = React.useCallback(async () => {
-    if (!user || !clientId || !visitDate) return;
+    if (!user || !clientId || !visitDate || !sessionType) return;
     setIsCreating(true);
     try {
       let clientForSession = clientDoc;
@@ -159,7 +161,39 @@ function SessionsPageInner() {
 
       const date_de_visite = format(visitDate, 'dd/MM/yyyy');
 
-      const payload = { nom_tc, nom_agri, contexte_client, date_de_visite };
+      // Session type configurations
+      const sessionTypeData: Record<string, string> = {
+        avec_client: `**Première intervention et lancement :**
+- Salue le technicien commercial.
+- Demande directement par quelle thématique il préfère débuter ou quel point il souhaite aborder en priorité.
+
+**Déroulement pour chaque sujet :**
+- Demande ce que le client a dit sur le point.
+- Recueille ce que le technicien commercial a observé.
+- Récupère ce qu'il a proposé ou clarifié au cours de la visite.`,
+        parcelle_seule: `**Première intervention et lancement :**
+- Salue le technicien commercial.
+- Demande directement quel point il a observé en premier sur la parcelle.
+
+**Déroulement pour chaque sujet :**
+- Recueille ce que le technicien commercial a observé sur la parcelle.
+- Récupère ce qu'il a proposé ou noté pour le suivi.`,
+        exploitation_sans_client: `**Première intervention et lancement :**
+- Salue le technicien commercial.
+- Demande directement quel point il a observé en premier sur l'exploitation.
+
+**Déroulement pour chaque sujet :**
+- Recueille ce que le technicien commercial a observé sur l'exploitation.
+- Récupère ce qu'il a proposé ou noté pour le suivi.`
+      };
+
+      const payload = { 
+        nom_tc, 
+        nom_agri, 
+        contexte_client, 
+        date_de_visite,
+        type_de_visite: sessionTypeData[sessionType]
+      };
       addLog(LogLevel.Event, 'Creating session', payload);
       const result = await apiClient.createSession(payload);
       if (result.ok) {
@@ -175,11 +209,12 @@ function SessionsPageInner() {
         // Aller immédiatement au temps réel
         router.push(`/session/${result.value.id}?clientId=${clientId}`);
         setVisitDate(undefined);
+        setSessionType('');
       }
     } finally {
       setIsCreating(false);
     }
-  }, [user, clientId, clientDoc, apiClient, addLog, router, refreshSessions, visitDate]);
+  }, [user, clientId, clientDoc, apiClient, addLog, router, refreshSessions, visitDate, sessionType]);
 
 
   // États de garde UI
@@ -209,11 +244,24 @@ function SessionsPageInner() {
           <Card>
             <CardHeader>
               <CardTitle>Démarrer une visite</CardTitle>
-              <CardDescription>Choisissez la date de votre visite puis lancez la session.</CardDescription>
+              <CardDescription>Choisissez le type de visite et la date, puis lancez la session.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center gap-3">
                 <div className="space-y-2">
+                  <Select value={sessionType} onValueChange={setSessionType}>
+                    <SelectTrigger className="h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto min-w-[200px] justify-center">
+                      <SelectValue placeholder="Type de visite" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        <SelectLabel>Sélectionnez le type de visite</SelectLabel>
+                        <SelectItem value="avec_client">Client</SelectItem>
+                        <SelectItem value="parcelle_seule">Parcelle</SelectItem>
+                        <SelectItem value="exploitation_sans_client">Exploitation</SelectItem>
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
                   
                    <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
                      <PopoverTrigger asChild>
@@ -242,7 +290,7 @@ function SessionsPageInner() {
                  </div>
                  <Button
                    className="h-10 px-5 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto"
-                   disabled={isCreating || !visitDate}
+                   disabled={isCreating || !visitDate || !sessionType}
                    onClick={startVisit}
                  >
                    {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChatPlusSolid />}
