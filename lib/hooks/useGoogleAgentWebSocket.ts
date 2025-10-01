@@ -112,7 +112,7 @@ export function useGoogleAgentWebSocket(clientId?: string) {
           default:
             break;
         }
-      } catch (e) {
+      } catch (_e) {
         // ignore
       }
     };

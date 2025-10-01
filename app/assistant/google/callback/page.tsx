@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Loader } from '@/components/ai-elements/loader';
 import { CheckCircleSolid, XCircleSolid } from '@mynaui/icons-react';
 
-export default function GoogleCallbackPage() {
+function GoogleCallbackPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -76,4 +76,21 @@ export default function GoogleCallbackPage() {
     </div>
   );
 }
+
+const GoogleCallbackPageWrapper = () => {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="text-center space-y-4">
+          <Loader />
+          <p className="text-muted-foreground">Chargement...</p>
+        </div>
+      </div>
+    }>
+      <GoogleCallbackPage />
+    </Suspense>
+  );
+};
+
+export default GoogleCallbackPageWrapper;
 

@@ -45,7 +45,7 @@ export default function GoogleAuthorizePage() {
             Autorisation Google requise
           </CardTitle>
           <CardDescription>
-            Pour utiliser l'assistant Google, vous devez autoriser l'accès à votre compte Google.
+            Pour utiliser l&apos;assistant Google, vous devez autoriser l&apos;accès à votre compte Google.
           </CardDescription>
         </CardHeader>
 
@@ -83,7 +83,7 @@ export default function GoogleAuthorizePage() {
           <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-md">
             <p className="text-xs text-blue-900 dark:text-blue-100">
               <strong>Note :</strong> Vos identifiants Google sont stockés de manière sécurisée 
-              et ne sont utilisés que pour les actions que vous demandez à l'assistant.
+              et ne sont utilisés que pour les actions que vous demandez à l&apos;assistant.
             </p>
           </div>
         </CardContent>

@@ -18,9 +18,8 @@ import {
   Actions,
   Action,
 } from '@/components/ai-elements/actions';
-import { Fragment, useState, useEffect } from 'react';
+import { Fragment, useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Response } from '@/components/ai-elements/response';
 import { CopyIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ArrowLeftSolid } from '@mynaui/icons-react';
@@ -104,7 +103,7 @@ const GoogleAssistantChat = () => {
             {/* Connection status */}
             {status === 'connecting' && (
               <div className="text-center text-sm text-muted-foreground py-4">
-                Connexion à l'assistant...
+                Connexion à l&apos;assistant...
               </div>
             )}
             {status === 'error' && (
@@ -167,4 +166,19 @@ const GoogleAssistantChat = () => {
   );
 };
 
-export default GoogleAssistantChat;
+const GoogleAssistantPage = () => {
+  return (
+    <Suspense fallback={
+      <div className="h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader />
+          <p className="mt-4 text-muted-foreground">Chargement...</p>
+        </div>
+      </div>
+    }>
+      <GoogleAssistantChat />
+    </Suspense>
+  );
+};
+
+export default GoogleAssistantPage;
