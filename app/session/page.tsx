@@ -16,7 +16,7 @@ import { cn } from '@/lib/utils';
 import { format } from 'date-fns';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { getClientById, listSessionsForClient, setClientSessionDoc, updateClientSessionDoc, deleteClientSessionDoc } from '@/lib/firebase';
-import { ChevronRightCircleSolid, BookOpenSolid, ChatPlusSolid, RefreshAltSolid, PanelRightOpenSolid, TrashOneSolid, BookImageSolid } from '@mynaui/icons-react';
+import { ChevronRightCircleSolid, BookOpenSolid, ChatPlusSolid, RefreshAltSolid, PanelRightOpenSolid, TrashOneSolid, BookImageSolid, BubblesSolid } from '@mynaui/icons-react';
 import Link from 'next/link';
 
 type ClientDoc = Pick<ClientRecord, 'id' | 'name' | 'email' | 'contexte'>;
@@ -393,6 +393,18 @@ function SessionsPageInner() {
             </CardContent>
           </Card>
         </div>
+      </div>
+
+      {/* Bouton Le Chat */}
+      <div className="flex justify-center mt-6">
+        <Button
+          size="lg"
+          className="inline-flex items-center justify-center h-12 px-6 gap-2 rounded-full text-base"
+          onClick={() => router.push(`/assistant/google?clientId=${clientId}`)}
+        >
+          <BubblesSolid />
+          <span>Le Chat</span>
+        </Button>
       </div>
     </div>
   );
