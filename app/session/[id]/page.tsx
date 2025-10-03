@@ -456,9 +456,10 @@ export default function SessionDetail() {
     if (!params.id || !user?.uid || !clientIdParam) return;
     dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: true });
     
-    // Mark session as generating in localStorage
+    // Mark session as generating in localStorage with timestamp
     const generatingKey = `generating-report-${params.id}`;
-    localStorage.setItem(generatingKey, 'true');
+    const timestamp = Date.now();
+    localStorage.setItem(generatingKey, timestamp.toString());
     
     // Redirect to sessions page immediately
     router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session');
@@ -488,7 +489,7 @@ export default function SessionDetail() {
     } catch (err) {
       addLog(LogLevel.Error, 'Failed to request report generation', err);
     } finally {
-      // Remove from localStorage when done
+      // Remove from localStorage when done (success or error)
       localStorage.removeItem(generatingKey);
       dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: false });
     }

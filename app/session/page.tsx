@@ -45,14 +45,33 @@ function SessionsPageInner() {
   // Client (pour nom_agri)
   const [clientDoc, setClientDoc] = React.useState<ClientDoc | null>(null);
 
-  // Check localStorage for generating sessions
+  // Check localStorage for generating sessions with timeout detection
   const checkGeneratingSessions = useCallback(() => {
     const generating = new Set<string>();
+    const now = Date.now();
+    const TIMEOUT_MS = 7 * 60 * 1000; // 7 minutes timeout (minimum generation time)
+    
     for (let i = 0; i < localStorage.length; i++) {
       const key = localStorage.key(i);
       if (key?.startsWith('generating-report-')) {
         const sessionId = key.replace('generating-report-', '');
-        generating.add(sessionId);
+        const timestampStr = localStorage.getItem(key);
+        
+        if (timestampStr) {
+          const timestamp = parseInt(timestampStr, 10);
+          const elapsed = now - timestamp;
+          
+          // If generation has been running for more than timeout, consider it stuck
+          if (elapsed > TIMEOUT_MS) {
+            console.warn(`Report generation for session ${sessionId} timed out after ${Math.round(elapsed / 1000)}s. Cleaning up.`);
+            localStorage.removeItem(key);
+          } else {
+            generating.add(sessionId);
+          }
+        } else {
+          // Old format without timestamp, remove it
+          localStorage.removeItem(key);
+        }
       }
     }
     setGeneratingSessions(generating);
@@ -353,6 +372,19 @@ function SessionsPageInner() {
                   {Array.isArray(firestoreSessions) && firestoreSessions.length > 0 ? (
                     firestoreSessions.map((s) => {
                       const isGenerating = generatingSessions.has(s.id);
+                      // Calculate elapsed time for generating sessions
+                      let elapsedText = '';
+                      if (isGenerating) {
+                        const timestampStr = localStorage.getItem(`generating-report-${s.id}`);
+                        if (timestampStr) {
+                          const timestamp = parseInt(timestampStr, 10);
+                          const elapsed = Math.floor((Date.now() - timestamp) / 1000);
+                          const minutes = Math.floor(elapsed / 60);
+                          const seconds = elapsed % 60;
+                          elapsedText = minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+                        }
+                      }
+                      
                       return (
                       <div
                         key={s.id}
@@ -372,7 +404,7 @@ function SessionsPageInner() {
                           <div className="min-w-0">
                             <div className="text-sm font-medium truncate">{displayLabelsById[s.id]?.title || clientDoc?.name || s.id}</div>
                             <div className="text-xs text-muted-foreground truncate">
-                              {isGenerating ? 'Génération du rapport en cours…' : (displayLabelsById[s.id]?.subtitle ?? (reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'))}
+                              {isGenerating ? `Génération du rapport en cours… (${elapsedText})` : (displayLabelsById[s.id]?.subtitle ?? (reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'))}
                             </div>
                           </div>
                         </div>
