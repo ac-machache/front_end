@@ -455,6 +455,14 @@ export default function SessionDetail() {
   const triggerReportGeneration = React.useCallback(async () => {
     if (!params.id || !user?.uid || !clientIdParam) return;
     dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: true });
+    
+    // Mark session as generating in localStorage
+    const generatingKey = `generating-report-${params.id}`;
+    localStorage.setItem(generatingKey, 'true');
+    
+    // Redirect to sessions page immediately
+    router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session');
+    
     try {
       const response = await apiClient.generateReport(params.id as string, {
         ville: clientMeta?.city ?? null,
@@ -480,9 +488,11 @@ export default function SessionDetail() {
     } catch (err) {
       addLog(LogLevel.Error, 'Failed to request report generation', err);
     } finally {
+      // Remove from localStorage when done
+      localStorage.removeItem(generatingKey);
       dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: false });
     }
-  }, [apiClient, params.id, clientMeta?.city, clientMeta?.zipCode, user?.uid, clientIdParam, addLog, dispatch, refetchReport, notifyReportReady]);
+  }, [apiClient, params.id, clientMeta?.city, clientMeta?.zipCode, user?.uid, clientIdParam, addLog, dispatch, refetchReport, notifyReportReady, router]);
 
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">

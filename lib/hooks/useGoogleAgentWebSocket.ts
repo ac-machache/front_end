@@ -74,10 +74,10 @@ export function useGoogleAgentWebSocket(clientId?: string) {
         const cid = clientIdRef.current;
         const uid = user?.uid;
         if (cid && uid) {
-          const currectPath = `technico/${uid}/clients/${cid}`;
+          const currentPath = `technico/${uid}/clients/${cid}`;
           ws.send(JSON.stringify({
             event: 'init',
-            currect_firestore_path: currectPath,
+            current_firestore_path: currentPath,
             nom_tc: user?.displayName || user?.email || 'Utilisateur',
             nom_agri: clientName || '',
           }));

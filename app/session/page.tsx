@@ -40,11 +40,48 @@ function SessionsPageInner() {
   const [firestoreSessions, setFirestoreSessions] = React.useState<Array<{ id: string; name?: string; is_report_done?: boolean; saved?: boolean }>>([]);
   const [reportReadyById, setReportReadyById] = React.useState<Record<string, boolean>>({});
   const [displayLabelsById, setDisplayLabelsById] = React.useState<Record<string, { title: string; subtitle?: string }>>({});
+  const [generatingSessions, setGeneratingSessions] = React.useState<Set<string>>(new Set());
 
   // Client (pour nom_agri)
   const [clientDoc, setClientDoc] = React.useState<ClientDoc | null>(null);
 
-  // Garde d’auth / clientId requis
+  // Check localStorage for generating sessions
+  const checkGeneratingSessions = useCallback(() => {
+    const generating = new Set<string>();
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key?.startsWith('generating-report-')) {
+        const sessionId = key.replace('generating-report-', '');
+        generating.add(sessionId);
+      }
+    }
+    setGeneratingSessions(generating);
+  }, []);
+
+  // Poll for generating sessions status
+  React.useEffect(() => {
+    checkGeneratingSessions();
+    const interval = setInterval(checkGeneratingSessions, 2000); // Check every 2 seconds
+    return () => clearInterval(interval);
+  }, [checkGeneratingSessions]);
+
+  // Listen for localStorage changes to detect when generation completes
+  React.useEffect(() => {
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key?.startsWith('generating-report-') && e.oldValue && !e.newValue) {
+        // A generating key was removed, refresh the list
+        setTimeout(() => {
+          checkGeneratingSessions();
+          void refreshSessions();
+        }, 500);
+      }
+    };
+    
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [checkGeneratingSessions]);
+
+  // Garde d'auth / clientId requis
   React.useEffect(() => {
     if (!loading && !user) router.replace('/welcome');
   }, [loading, user, router]);
@@ -314,24 +351,33 @@ function SessionsPageInner() {
 
                 <div className="space-y-2">
                   {Array.isArray(firestoreSessions) && firestoreSessions.length > 0 ? (
-                    firestoreSessions.map((s) => (
+                    firestoreSessions.map((s) => {
+                      const isGenerating = generatingSessions.has(s.id);
+                      return (
                       <div
                         key={s.id}
-                        className="flex items-center justify-between rounded-md border px-3 py-3 gap-3 md:gap-2 min-h-14 md:min-h-12 cursor-pointer hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/50 outline-none select-none"
+                        className={cn(
+                          "flex items-center justify-between rounded-md border px-3 py-3 gap-3 md:gap-2 min-h-14 md:min-h-12 outline-none select-none",
+                          isGenerating ? "cursor-not-allowed opacity-70" : "cursor-pointer hover:bg-accent/40 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                        )}
                         role="button"
-                        tabIndex={0}
-                        onClick={() => handleGoToSession(s.id)}
-                        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleGoToSession(s.id); } }}
+                        tabIndex={isGenerating ? -1 : 0}
+                        onClick={() => !isGenerating && handleGoToSession(s.id)}
+                        onKeyDown={(e) => { if (!isGenerating && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); handleGoToSession(s.id); } }}
                         aria-label={`Ouvrir la session ${s.id}`}
+                        aria-disabled={isGenerating}
                       >
-                        <div className="min-w-0">
-                          <div className="text-sm font-medium truncate">{displayLabelsById[s.id]?.title || clientDoc?.name || s.id}</div>
-                          <div className="text-xs text-muted-foreground truncate">
-                            {displayLabelsById[s.id]?.subtitle ?? (reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…')}
+                        <div className="min-w-0 flex items-center gap-2">
+                          {isGenerating && <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />}
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium truncate">{displayLabelsById[s.id]?.title || clientDoc?.name || s.id}</div>
+                            <div className="text-xs text-muted-foreground truncate">
+                              {isGenerating ? 'Génération du rapport en cours…' : (displayLabelsById[s.id]?.subtitle ?? (reportReadyById[s.id] ? 'Rapport disponible' : 'En cours…'))}
+                            </div>
                           </div>
                         </div>
                         <div className="flex items-center gap-3 md:gap-2" role="group" aria-label="Actions de session">
-                          {reportReadyById[s.id] && !s.saved && (
+                          {reportReadyById[s.id] && !s.saved && !isGenerating && (
                             <Button
                               size="icon"
                               variant="default"
@@ -359,6 +405,7 @@ function SessionsPageInner() {
                             aria-label={reportReadyById[s.id] ? 'Lire' : 'Ouvrir'}
                             title={reportReadyById[s.id] ? 'Lire le rapport' : 'Ouvrir la session'}
                             className="size-11 md:size-9 p-0 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white flex items-center justify-center"
+                            disabled={isGenerating}
                             onClick={(e) => { e.stopPropagation(); handleGoToSession(s.id); }}
                           >
                             {reportReadyById[s.id] ? <BookOpenSolid className="size-5 md:size-4" /> : <ChevronRightCircleSolid className="size-5 md:size-4" />}
@@ -369,6 +416,7 @@ function SessionsPageInner() {
                             aria-label="Supprimer"
                             title="Supprimer"
                             className="size-11 md:size-9 p-0 rounded-full bg-red-800 hover:bg-red-700 border-red-700 text-white flex items-center justify-center"
+                            disabled={isGenerating}
                             onClick={async (e) => {
                               e.stopPropagation();
                               if (!user) return;
@@ -383,7 +431,7 @@ function SessionsPageInner() {
                           </Button>
                         </div>
                       </div>
-                    ))
+                    );})
                   ) : (
                     <p className="text-sm text-muted-foreground">Aucune visite. Cliquez sur « Actualiser ».</p>
                   )}
