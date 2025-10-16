@@ -287,7 +287,7 @@ function SessionsPageInner() {
   return (
     <div className="max-w-6xl mx-auto p-4">
       <div className="flex justify-between items-center gap-3 flex-col md:flex-row">
-        <p className="w-full md:w-auto text-base md:text-lg font-semibold">Gérez vos sessions pour: {clientDoc?.name || clientId}</p>
+        <p className="w-full md:w-auto text-base md:text-lg font-semibold">Interactions avec {clientDoc?.name || clientId}</p>
         <Button asChild className="w-full md:w-auto h-10 px-4 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white">
           <Link href="/clients"><PanelRightOpenSolid className="mr-2" />Retour aux clients</Link>
         </Button>
@@ -298,19 +298,19 @@ function SessionsPageInner() {
         <div className="space-y-4">
           <Card>
             <CardHeader>
-              <CardTitle>Démarrer une visite</CardTitle>
-              <CardDescription>Choisissez le type de visite et la date, puis lancez la session.</CardDescription>
+              <CardTitle>Démarrer une interaction</CardTitle>
+              <CardDescription>Choisissez le type d&apos;interaction et la date, puis lancez la session.</CardDescription>
             </CardHeader>
             <CardContent>
               <div className="flex flex-col items-center gap-4">
                 <div className="flex flex-col items-stretch gap-3 w-full max-w-md">
                   <Select value={sessionType} onValueChange={setSessionType}>
                     <SelectTrigger className="h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-full justify-center">
-                      <SelectValue placeholder="Type de visite" />
+                      <SelectValue placeholder="Type d&apos;interaction" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
-                        <SelectLabel>Sélectionnez le type de visite</SelectLabel>
+                        <SelectLabel>Sélectionnez le type d&apos;interaction</SelectLabel>
                         <SelectItem value="avec_client">Interaction clients (Agrilink)</SelectItem>
                         <SelectItem value="parcelle_seule">Observation de parcelle (FieldEye)</SelectItem>
                         <SelectItem value="exploitation_sans_client">Suivi d&apos;exploitation (FarmScope)</SelectItem>
@@ -349,7 +349,7 @@ function SessionsPageInner() {
                    onClick={startVisit}
                  >
                    {isCreating ? <Loader2 className="h-4 w-4 animate-spin" /> : <ChatPlusSolid />}
-                   {isCreating ? 'Démarrage…' : 'Commencer la visite'}
+                   {isCreating ? 'Démarrage…' : "Commencer l'interaction"}
                  </Button>
                </div>
              </CardContent>
@@ -357,7 +357,7 @@ function SessionsPageInner() {
 
            <Card>
              <CardHeader>
-               <CardTitle>Vos visites</CardTitle>
+               <CardTitle>Vos interactions</CardTitle>
              </CardHeader>
              <CardContent>
                <div className="space-y-3">
@@ -452,7 +452,7 @@ function SessionsPageInner() {
                             onClick={async (e) => {
                               e.stopPropagation();
                               if (!user) return;
-                              const ok = window.confirm('Supprimer cette visite ?');
+                              const ok = window.confirm('Supprimer cette interaction ?');
                               if (!ok) return;
                               try { await apiClient.deleteSession(s.id); } catch {}
                               try { await deleteClientSessionDoc(user.uid, clientId, s.id); } catch {}
@@ -465,7 +465,7 @@ function SessionsPageInner() {
                       </div>
                     );})
                   ) : (
-                    <p className="text-sm text-muted-foreground">Aucune visite. Cliquez sur « Actualiser ».</p>
+                    <p className="text-sm text-muted-foreground">Aucune interaction. Cliquez sur « Actualiser ».</p>
                   )}
                 </div>
               </div>
@@ -474,7 +474,7 @@ function SessionsPageInner() {
         </div>
       </div>
 
-      {/* Bouton Ouvrir AgriHub */}
+      {/* Bouton Ouvrir AgriDesk */}
       <div className="flex justify-center mt-6">
         <Button
           size="lg"
@@ -482,7 +482,7 @@ function SessionsPageInner() {
           onClick={() => router.push(`/assistant/google?clientId=${clientId}`)}
         >
           <BubblesSolid />
-          <span>Ouvrir AgriHub</span>
+          <span>Ouvrir AgriDesk</span>
         </Button>
       </div>
     </div>

@@ -504,7 +504,7 @@ export default function SessionDetail() {
           onClick={() => router.replace(clientIdParam ? `/session?clientId=${clientIdParam}` : '/session')}
         >
           <PanelRightOpenSolid />
-          Retour aux sessions
+          Retour aux interactions
         </Button>
       </div>
 
@@ -521,7 +521,7 @@ export default function SessionDetail() {
             </div>
           )}
           <p className={`text-sm text-muted-foreground text-center max-w-xl transition-opacity ${uiState.isGeneratingReport ? 'opacity-40' : 'opacity-100'}`}>
-            Aucun rapport n’est disponible pour cette session. Si votre visite est terminée, vous pouvez la finaliser. Sinon, lancez un appel pour continuer en temps réel.
+            Aucun rapport n&apos;est disponible pour cette session. Si votre interaction est terminée, vous pouvez la finaliser. Sinon, lancez l&apos;interaction pour continuer en temps réel.
           </p>
           <div className={`flex flex-col items-center gap-3 transition-opacity ${uiState.isGeneratingReport ? 'opacity-40' : 'opacity-100'}`} aria-hidden={uiState.isGeneratingReport}>
             <Button
@@ -535,7 +535,7 @@ export default function SessionDetail() {
               }}
             >
               <TelephoneSolid />
-              <span>{uiState.isConnecting ? 'Connexion…' : 'Démarrer l’appel'}</span>
+              <span>{uiState.isConnecting ? 'Connexion…' : "Lancer l'interaction"}</span>
             </Button>
             <Button
               size="lg"
@@ -550,7 +550,7 @@ export default function SessionDetail() {
               )}
               <span className={uiState.isGeneratingReport ? 'opacity-0' : 'inline-flex items-center gap-2'}>
                 <BookmarkSolid />
-                <span>Finaliser la visite</span>
+                <span>Finaliser l&apos;interaction</span>
               </span>
             </Button>
           </div>

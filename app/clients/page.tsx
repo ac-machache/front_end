@@ -90,7 +90,7 @@ export default function ClientsPage() {
       <Card>
         <CardHeader>
           <CardTitle>Ajouter un client</CardTitle>
-          <CardDescription>Créez un client pour organiser vos visites.</CardDescription>
+          <CardDescription>Créez un client pour organiser vos interactions.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
@@ -156,7 +156,7 @@ export default function ClientsPage() {
             </CardContent>
             <CardFooter>
               <Button asChild size="sm" className="rounded-full h-9 px-3 gap-2">
-                <Link href={`/session?clientId=${c.id}`}><ListSolid /> Voir les visites</Link>
+                <Link href={`/session?clientId=${c.id}`}><ListSolid /> Voir les interactions</Link>
               </Button>
             </CardFooter>
           </Card>
