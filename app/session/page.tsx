@@ -302,47 +302,47 @@ function SessionsPageInner() {
               <CardDescription>Choisissez le type de visite et la date, puis lancez la session.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex flex-col items-center gap-3">
-                <div className="space-y-2">
+              <div className="flex flex-col items-center gap-4">
+                <div className="flex flex-col items-stretch gap-3 w-full max-w-md">
                   <Select value={sessionType} onValueChange={setSessionType}>
-                    <SelectTrigger className="h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto min-w-[200px] justify-center">
+                    <SelectTrigger className="h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-full justify-center">
                       <SelectValue placeholder="Type de visite" />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectGroup>
                         <SelectLabel>Sélectionnez le type de visite</SelectLabel>
-                        <SelectItem value="avec_client">Client</SelectItem>
-                        <SelectItem value="parcelle_seule">Parcelle</SelectItem>
-                        <SelectItem value="exploitation_sans_client">Exploitation</SelectItem>
+                        <SelectItem value="avec_client">Interaction clients (Agrilink)</SelectItem>
+                        <SelectItem value="parcelle_seule">Observation de parcelle (FieldEye)</SelectItem>
+                        <SelectItem value="exploitation_sans_client">Suivi d&apos;exploitation (FarmScope)</SelectItem>
                       </SelectGroup>
                     </SelectContent>
                   </Select>
-                  
-                   <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
-                     <PopoverTrigger asChild>
-                       <Button
-                         id="visit-date"
-                         variant="default"
-                         className={cn('h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto justify-center')}
-                       >
-                         <CalendarDownSolid className="h-4 w-4" />
-                         {visitDate ? format(visitDate, 'dd/MM/yyyy') : 'Sélectionnez une date'}
-                       </Button>
-                     </PopoverTrigger>
-                     <PopoverContent className="w-auto p-0 overflow-hidden" align="start">
-                       <Calendar
-                         mode="single"
-                         selected={visitDate}
-                         captionLayout="dropdown"
-                         onSelect={(date) => {
-                           setVisitDate(date ?? undefined);
-                           if (date) setIsDatePickerOpen(false);
-                         }}
-                         initialFocus
-                       />
-                     </PopoverContent>
-                   </Popover>
-                 </div>
+
+                  <Popover open={isDatePickerOpen} onOpenChange={setIsDatePickerOpen}>
+                    <PopoverTrigger asChild>
+                      <Button
+                        id="visit-date"
+                        variant="default"
+                        className={cn('h-10 px-4 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-full justify-center')}
+                      >
+                        <CalendarDownSolid className="h-4 w-4" />
+                        {visitDate ? format(visitDate, 'dd/MM/yyyy') : 'Sélectionnez une date'}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0 overflow-hidden" align="start">
+                      <Calendar
+                        mode="single"
+                        selected={visitDate}
+                        captionLayout="dropdown"
+                        onSelect={(date) => {
+                          setVisitDate(date ?? undefined);
+                          if (date) setIsDatePickerOpen(false);
+                        }}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
                  <Button
                    className="h-10 px-5 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white text-sm w-auto"
                    disabled={isCreating || !visitDate || !sessionType}
@@ -474,7 +474,7 @@ function SessionsPageInner() {
         </div>
       </div>
 
-      {/* Bouton Le Chat */}
+      {/* Bouton Ouvrir AgriHub */}
       <div className="flex justify-center mt-6">
         <Button
           size="lg"
@@ -482,7 +482,7 @@ function SessionsPageInner() {
           onClick={() => router.push(`/assistant/google?clientId=${clientId}`)}
         >
           <BubblesSolid />
-          <span>Le Chat</span>
+          <span>Ouvrir AgriHub</span>
         </Button>
       </div>
     </div>
