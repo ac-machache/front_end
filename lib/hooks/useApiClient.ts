@@ -38,5 +38,7 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
       performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`),
     generateReport: (sessionId: string, payload?: Record<string, unknown>) =>
       performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/generate-report`, payload),
+    createNote: (sessionId: string, payload: { date_de_visite: string; audio_data: string }) =>
+      performRequest<{ result: string; data: string }>('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/create_note`, payload),
   }), [performRequest, config.appName, config.userId]);
 }

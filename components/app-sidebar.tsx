@@ -7,7 +7,7 @@ import {
   ChevronDown,
   Users,
 } from "lucide-react"
-import { HomeSolid } from "@mynaui/icons-react"
+import { HomeSolid, ClipboardSolid } from "@mynaui/icons-react"
 
 import {
   SidebarContent,
@@ -19,6 +19,7 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
@@ -114,12 +115,21 @@ export function AppSidebar() {
 
   return (
     <>
-      <SidebarHeader>
-        <SidebarMenu>
+      <SidebarHeader className="p-0 gap-0">
+        {/* Toggle Button + Logo - Fixed height to match navbar */}
+        <div className="flex items-center gap-2 px-3 h-12 md:h-14">
+          <SidebarTrigger className="flex-shrink-0" />
+          <div className="flex flex-col gap-0.5 min-w-0 group-data-[collapsible=icon]:hidden">
+            <span className="text-base font-semibold truncate">IAdvisor</span>
+            <span className="text-xs text-sidebar-foreground/70 truncate">Conseil agricole</span>
+          </div>
+        </div>
+        
+        <SidebarMenu className="p-2">
           <SidebarMenuItem>
             <DropdownMenu>
               <DropdownMenuTrigger asChild disabled={isLoadingClients || clients.length === 0}>
-                <SidebarMenuButton className="justify-between group-data-[collapsible=icon]:hidden">
+                <SidebarMenuButton className="justify-between group-data-[collapsible=icon]:hidden border border-sidebar-border rounded-md px-3 py-2 h-auto">
                   <div className="flex flex-col gap-0.5 text-left">
                     <span className="text-sm font-semibold leading-none">
                       {activeClient?.name ?? "Sélectionner un client"}
@@ -157,7 +167,7 @@ export function AppSidebar() {
         </SidebarMenu>
       </SidebarHeader>
 
-      <SidebarContent>
+      <SidebarContent className="gap-0">
         <SidebarGroup>
           <SidebarGroupLabel>Navigation</SidebarGroupLabel>
           <SidebarGroupContent>
@@ -243,6 +253,30 @@ export function AppSidebar() {
                   >
                     <ArchiveSolid className="size-4" />
                     <span>Historique</span>
+                  </Link>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel>Notes</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  asChild
+                  isActive={pathname.startsWith("/workspace/notes")}
+                  tooltip="Voir les notes"
+                  disabled={!activeClientId}
+                >
+                  <Link
+                    href={activeClientId ? `/workspace/notes?clientId=${activeClientId}` : "/workspace/notes"}
+                    onClick={handleNavigate}
+                  >
+                    <ClipboardSolid className="size-4" />
+                    <span>Voir les notes</span>
                   </Link>
                 </SidebarMenuButton>
               </SidebarMenuItem>

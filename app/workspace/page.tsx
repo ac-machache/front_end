@@ -98,7 +98,7 @@ export default function WorkspacePage() {
               📋 Autorisations Google requises
             </p>
             <p className="text-xs text-blue-800 dark:text-blue-200">
-              Pour utiliser AgriDesk, vous devez d'abord autoriser l'accès à :
+              Pour utiliser AgriDesk, vous devez d&apos;abord autoriser l&apos;accès à :
             </p>
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2 text-xs text-blue-900 dark:text-blue-100">

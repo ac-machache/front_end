@@ -189,4 +189,59 @@ export async function deleteClientSessionDoc(
   await deleteDoc(ref);
 }
 
+// --- Notes helpers ---
+export interface NotePayload {
+  title: string;
+  date_de_visite: string;
+  date_de_creation: string;
+  Content: string;
+  audioData: string;
+  sessionId: string;
+}
+
+export async function listNotesForClient(userId: string, clientId: string): Promise<DocumentData[]> {
+  const db = getDb();
+  if (!db) return [];
+  const col = collection(db, 'technico', userId, 'clients', clientId, 'notes');
+  const snap = await getDocs(col);
+  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+}
+
+export async function getClientNoteDoc(
+  userId: string,
+  clientId: string,
+  noteId: string
+): Promise<(DocumentData & { id: string }) | null> {
+  const db = getDb();
+  if (!db) return null;
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'notes', noteId);
+  const snap = await getDoc(ref);
+  if (!snap.exists()) return null;
+  return { id: snap.id, ...snap.data() } as DocumentData & { id: string };
+}
+
+export async function setClientNoteDoc(
+  userId: string,
+  clientId: string,
+  noteId: string,
+  data: NotePayload
+): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'notes', noteId);
+  const payload = pruneUndefined({ ...data, createdAt: serverTimestamp() });
+  await setDoc(ref, payload);
+}
+
+export async function deleteClientNoteDoc(
+  userId: string,
+  clientId: string,
+  noteId: string
+): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const ref = doc(db, 'technico', userId, 'clients', clientId, 'notes', noteId);
+  await deleteDoc(ref);
+}
+
 
