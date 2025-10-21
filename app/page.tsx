@@ -9,7 +9,7 @@ export default function Home() {
 
   React.useEffect(() => {
     if (loading) return;
-    router.replace(user ? '/clients' : '/welcome');
+    router.replace(user ? '/workspace' : '/welcome');
   }, [loading, user, router]);
 
   return (

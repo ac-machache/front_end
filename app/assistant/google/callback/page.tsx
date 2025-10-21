@@ -27,11 +27,11 @@ function GoogleCallbackPage() {
       setStatus('success');
       setMessage('Autorisation réussie ! Redirection...');
       
-      // Get return URL from session storage or default to chat
-      const returnUrl = sessionStorage.getItem('google_auth_return_url') || '/assistant/google';
+      // Get return URL from session storage or default to home page
+      const returnUrl = sessionStorage.getItem('google_auth_return_url') || '/workspace';
       sessionStorage.removeItem('google_auth_return_url');
       
-      // Redirect to chat after 1 second
+      // Redirect to home page after 1 second
       setTimeout(() => {
         router.push(returnUrl);
       }, 1000);

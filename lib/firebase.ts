@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, type Auth } from 'firebase/auth';
-import { getFirestore, collection, addDoc, getDocs, serverTimestamp, doc, getDoc, setDoc, deleteDoc, type Firestore, type DocumentData } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, getDocs, serverTimestamp, doc, getDoc, setDoc, updateDoc, deleteDoc, type Firestore, type DocumentData } from 'firebase/firestore';
 
 type FirebaseWebConfig = {
   apiKey: string;
@@ -78,9 +78,11 @@ function pruneUndefined<T extends Record<string, unknown>>(obj: T): Partial<T> {
 export interface ClientPayload {
   name: string;
   email: string;
-  city: string;
-  zipCode: string;
-  contexte: string;
+  phone?: string;
+  city?: string;
+  zipCode?: string;
+  address?: string;
+  contexte?: string;
 }
 
 export async function addClientForUser(userId: string, data: ClientPayload): Promise<string | null> {
@@ -92,6 +94,13 @@ export async function addClientForUser(userId: string, data: ClientPayload): Pro
   return docRef.id ?? null;
 }
 
+export async function updateClientDoc(userId: string, clientId: string, data: Partial<ClientPayload>): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const clientRef = doc(db, 'technico', userId, 'clients', clientId);
+  const payload = pruneUndefined({ ...data, updatedAt: serverTimestamp() });
+  await updateDoc(clientRef, payload);
+}
 
 // Ensure a user document exists and the clients subcollection is initialized
 export type BasicUser = { uid: string; email?: string | null; displayName?: string | null; photoURL?: string | null };

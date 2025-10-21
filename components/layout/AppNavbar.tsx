@@ -1,13 +1,18 @@
 "use client";
-import React from 'react';
-import { Button } from '@/components/ui/button';
-import { useAuth } from '@/components/auth/AuthProvider';
-import Link from 'next/link';
-import Image from 'next/image';
-import { Moon, Sun } from 'lucide-react';
-import { LogoutSolid } from '@mynaui/icons-react';
+import React from "react"
+import Image from "next/image"
+import { Moon, Sun } from "lucide-react"
+import { LogoutSolid } from "@mynaui/icons-react"
 
-export default function AppNavbar() {
+import { Button } from "@/components/ui/button"
+import { useAuth } from "@/components/auth/AuthProvider"
+
+type AppNavbarProps = {
+  leading?: React.ReactNode
+  children?: React.ReactNode
+}
+
+export default function AppNavbar({ leading, children }: AppNavbarProps) {
   const { user, signOut, loading } = useAuth();
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => { setMounted(true); }, []);
@@ -37,13 +42,16 @@ export default function AppNavbar() {
   }, []);
 
   return (
-    <header className="w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60" suppressHydrationWarning>
-      <div className="mx-auto max-w-6xl px-3 md:px-4 h-12 md:h-14 flex items-center justify-between gap-2 flex-wrap">
-        <Link href="/clients" className="flex items-center gap-2 min-w-0">
-          <Image src="/globe.svg" alt="logo" width={24} height={24} />
-          <span className="font-semibold truncate">IAdvisor</span>
-        </Link>
+    <header
+      className="w-full border-b bg-background/80 backdrop-blur supports-[backdrop-filter]:bg-background/60"
+      suppressHydrationWarning
+    >
+      <div className="mx-auto flex h-12 w-full max-w-6xl flex-1 items-center justify-between gap-3 px-3 md:h-14 md:px-4">
+        <div className="flex items-center gap-2 min-w-0">
+          {leading}
+        </div>
         <div className="flex items-center gap-2">
+          {children}
           {mounted && (
             <Button variant="ghost" size="icon" aria-label="Basculer le thème" onClick={toggleTheme}>
               {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}

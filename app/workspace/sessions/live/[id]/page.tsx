@@ -3,7 +3,6 @@ import React, { useCallback, useMemo, useRef } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import CallScreen from '@/components/agent/CallScreen';
-import ReportDisplay from '@/components/agent/ReportDisplay';
 import type { Config, HeartbeatEvent } from '@/lib/types';
 import { LogLevel, WsStatus } from '@/lib/types';
 import {
@@ -16,19 +15,18 @@ import {
   useVisibilityGuard,
   useWakeLock,
   useUiState,
-  useSessionReport,
   useLogger,
   AUDIO_CONSTANTS
 } from '@/lib/hooks';
 import { useSearchParams } from 'next/navigation';
-import { TelephoneSolid, PanelRightOpenSolid, BookmarkSolid } from '@mynaui/icons-react';
+import { PanelRightOpenSolid, BookmarkSolid } from '@mynaui/icons-react';
 import { routeWsMessage } from '@/lib/wsRouter';
 import { buildWebSocketUrl } from '@/lib/utils';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { getClientById, updateClientSessionDoc } from '@/lib/firebase';
 import { Spinner } from '@/components/ui/shadcn-io/spinner';
 
-export default function SessionDetail() {
+export default function LiveSessionPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -37,7 +35,6 @@ export default function SessionDetail() {
   const [config, setConfig] = useLocalStorage<Config>('app-config', { scheme: 'wss', host: 'localhost', port: '443', appName: 'app', userId: 'user', sessionId: '' });
 
   const { state: uiState, dispatch } = useUiState();
-  const { reportDetails, reportLoading, refetch: refetchReport } = useSessionReport(params.id!, clientIdParam, user);
   const [clientMeta, setClientMeta] = React.useState<{ city?: string; zipCode?: string } | null>(null);
   const generatingOverlayRef = React.useRef<HTMLDivElement | null>(null);
 
@@ -46,14 +43,11 @@ export default function SessionDetail() {
   const micHwBeforeHideRef = useRef<boolean>(false);
   const streamingBeforeHideRef = useRef<boolean>(false);
 
-  // Create refs to avoid TDZ issues
   const connectRef = React.useRef<() => void>(() => {});
   const disconnectRef = React.useRef<() => void>(() => {});
 
-  // Initialize hooks
   const { addLog } = useLogger();
 
-  // Backend API client for report fetching (userId is the clientId)
   const apiClient = useApiClient({
     scheme: (typeof window !== 'undefined' && window.location.protocol === 'https:') ? 'wss' : 'ws',
     host: 'env',
@@ -63,24 +57,18 @@ export default function SessionDetail() {
     sessionId: ''
   }, addLog);
 
-  // Audio playback management
   const audioPlayback = useAudioPlayback(addLog);
-  // Track last mic level for visualizer
   const lastLevelRef = React.useRef<number>(0);
-  // Connected sound flags
   const pendingConnectedSoundRef = React.useRef<boolean>(false);
   const connectedSoundPlayedRef = React.useRef<boolean>(false);
 
-  // Session mode management
   const sessionMode = useSessionMode(addLog);
 
-  // Ensure sessionId matches URL
   React.useEffect(() => {
     const id = params?.id as string;
     if (id && config.sessionId !== id) setConfig(prev => ({ ...prev, sessionId: id }));
   }, [params?.id, config.sessionId, setConfig]);
 
-  // Ensure userId matches clientId for WS routing
   React.useEffect(() => {
     const cid = clientIdParam;
     if (cid && config.userId !== cid) setConfig(prev => ({ ...prev, userId: cid }));
@@ -88,15 +76,12 @@ export default function SessionDetail() {
 
   const wsUrl = useMemo(() => buildWebSocketUrl(params.id!, clientIdParam), [params.id, clientIdParam]);
 
-  // Server handshake readiness
   const serverReadyRef = useRef<boolean>(uiState.serverReady);
   React.useEffect(() => { serverReadyRef.current = uiState.serverReady; }, [uiState.serverReady]);
   const isMicOnRef = useRef<boolean>(uiState.isStreamingOn);
   React.useEffect(() => { isMicOnRef.current = uiState.isStreamingOn; }, [uiState.isStreamingOn]);
-  // Mirror of wsStatus for early callbacks before declaration
   const wsStatusRef = useRef<WsStatus>(WsStatus.Disconnected);
 
-  // Bridge sendMessage to audio hook without TDZ issues
   const sendMessageRef = useRef<(data: unknown) => void>(() => {});
   const onMicData = useCallback((base64: string) => {
     const canSend = uiState.isOnline && serverReadyRef.current && uiState.serverAlive && isMicOnRef.current && !uiState.isThinking && wsStatusRef.current === WsStatus.Connected;
@@ -104,6 +89,7 @@ export default function SessionDetail() {
       sendMessageRef.current({ mime_type: 'audio/pcm', data: base64 });
     }
   }, [uiState.isOnline, uiState.serverAlive, uiState.isThinking]);
+  
   const { startMic, stopMic, playAudioChunk, clearPlaybackQueue, setStreamingEnabled } = useAudioProcessor(
     onMicData,
     addLog,
@@ -111,8 +97,6 @@ export default function SessionDetail() {
     () => { try { audioPlayback.endModelAudio(); } catch {} }
   );
 
-
-  // Define after useAudioProcessor to avoid TDZ; then assign in effect
   const onWsOpenRef = useRef<() => void>(() => {});
 
   React.useEffect(() => {
@@ -132,12 +116,11 @@ export default function SessionDetail() {
       addLog(LogLevel.Ws, 'Browser online', { online: true, visibility: typeof document !== 'undefined' ? document.visibilityState : undefined });
     };
     const handleOffline = () => {
-        dispatch({ type: 'SET_IS_ONLINE', payload: false });
+      dispatch({ type: 'SET_IS_ONLINE', payload: false });
       addLog(LogLevel.Ws, 'Browser offline', { online: false, visibility: typeof document !== 'undefined' ? document.visibilityState : undefined });
       disconnectRef.current();
       audioPlayback.cleanup();
       sessionMode.setDisconnected();
-      // Reset local flags
       setStreamingEnabled(false);
       dispatch({ type: 'RESET_CALL_STATE' });
       pendingConnectedSoundRef.current = true;
@@ -151,8 +134,6 @@ export default function SessionDetail() {
     };
   }, [addLog, disconnectRef, audioPlayback, sessionMode, setStreamingEnabled, dispatch]);
 
-
-  // --- WebSocket Message Handlers ---
   const handleReady = useCallback(() => {
     addLog(LogLevel.Event, 'Server ready - audio can now be sent', {
       micOn: isMicOnRef.current,
@@ -163,13 +144,12 @@ export default function SessionDetail() {
     dispatch({ type: 'SET_SERVER_READY', payload: true });
   }, [addLog, audioPlayback, dispatch]);
 
-
   const handleSpeechControl = useCallback((event: 'speech_start' | 'speech_end') => {
     if (event === 'speech_start') {
-        dispatch({ type: 'SET_LISTENING', payload: true });
+      dispatch({ type: 'SET_LISTENING', payload: true });
       clearPlaybackQueue();
     } else {
-        dispatch({ type: 'SET_LISTENING', payload: false });
+      dispatch({ type: 'SET_LISTENING', payload: false });
     }
   }, [clearPlaybackQueue, dispatch]);
 
@@ -291,12 +271,10 @@ export default function SessionDetail() {
     stopMic();
     audioPlayback.cleanup();
     addLog(LogLevel.Audio, 'Disabling streaming');
-    // Explicit reset
     setStreamingEnabled(false);
     dispatch({ type: 'RESET_CALL_STATE' });
     sessionMode.resetToIdle();
     clearPlaybackQueue();
-    // Prepare next connect sound and close overlay
     pendingConnectedSoundRef.current = true;
     connectedSoundPlayedRef.current = false;
   }, [addLog, stopMic, audioPlayback, setStreamingEnabled, sessionMode, clearPlaybackQueue, uiState.serverAlive, uiState.isThinking, wsUrl, dispatch]);
@@ -304,7 +282,6 @@ export default function SessionDetail() {
   const onWsError = useCallback((event?: Event) => addLog(LogLevel.Error, 'WebSocket error', event), [addLog]);
   const { connect, disconnect, sendMessage, status: wsStatus } = useWebSocket(wsUrl, () => onWsOpenRef.current(), onWsMessage, onWsClose, onWsError);
 
-  // Update refs after WebSocket hook initialization
   React.useEffect(() => { connectRef.current = connect; disconnectRef.current = disconnect; }, [connect, disconnect]);
   React.useEffect(() => { wsStatusRef.current = wsStatus; }, [wsStatus]);
 
@@ -312,7 +289,6 @@ export default function SessionDetail() {
     sendMessageRef.current = (data: unknown) => sendMessage(data);
   }, [sendMessage]);
 
-  // Ensure a clean slate before manualConnect: if an old connecting socket lingers, replace it
   const safeManualConnect = React.useCallback(async () => {
     try {
       connectRef.current();
@@ -334,7 +310,6 @@ export default function SessionDetail() {
     const shouldEnable = !!(uiState.isOnline && wsStatus === WsStatus.Connected && uiState.serverReady && uiState.isMicHwOn && uiState.isStreamingOn && uiState.serverAlive && !uiState.isThinking);
     setStreamingEnabled(shouldEnable);
 
-    // Log gate changes with reasons (low-noise: only on change)
     const prevRef = (React as unknown as { __streamGatePrev?: { current: boolean } }).__streamGatePrev;
     if (!prevRef || typeof prevRef.current !== 'boolean' || prevRef.current !== shouldEnable) {
       addLog(LogLevel.Audio, `Streaming gate ${shouldEnable ? 'OPEN' : 'CLOSED'}`, {
@@ -349,7 +324,6 @@ export default function SessionDetail() {
     }
     (React as unknown as { __streamGatePrev?: { current: boolean } }).__streamGatePrev = { current: shouldEnable };
 
-    // Play connected sound once when streaming becomes active after user-initiated Connect
     const prev = (React as unknown as { __prevShouldEnable?: { current?: boolean } }).__prevShouldEnable;
     if (!prev || typeof prev.current !== 'boolean') { (React as unknown as { __prevShouldEnable?: { current?: boolean } }).__prevShouldEnable = { current: shouldEnable }; }
     const prevVal = prev?.current ?? false;
@@ -411,7 +385,6 @@ export default function SessionDetail() {
     fetchClientMeta();
   }, [user?.uid, clientIdParam, addLog]);
 
-  // Reset to idle when mic state changes
   React.useEffect(() => {
     sessionMode.resetToIdle();
   }, [uiState.isStreamingOn, sessionMode]);
@@ -421,47 +394,22 @@ export default function SessionDetail() {
     if (wsStatus === WsStatus.Disconnected) dispatch({ type: 'SET_IS_DISCONNECTING', payload: false });
   }, [wsStatus, dispatch]);
 
-  const reportContent = reportDetails?.state?.RapportDeSortie;
-  const hasReport = !!reportContent && Object.keys(reportContent as Record<string, unknown>).length > 0;
-
-  const notifyReportReady = useCallback(() => {
-    if (typeof window === 'undefined' || !('Notification' in window)) return;
-    const openReport = () => {
-      const targetUrl = `${window.location.origin}/session/${params.id}?clientId=${clientIdParam}`;
-      window.focus();
-      if (window.location.href !== targetUrl) {
-        window.location.href = targetUrl;
-      }
-    };
-    const createNotification = () => {
-      const notification = new Notification('Rapport généré', {
-        body: "Cliquez pour consulter le rapport finalisé.",
-        tag: `report-${params.id}`,
-      });
-      notification.onclick = () => {
-        openReport();
-        notification.close();
-      };
-    };
-    if (Notification.permission === 'granted') {
-      createNotification();
-    } else if (Notification.permission !== 'denied') {
-      Notification.requestPermission().then((permission) => {
-        if (permission === 'granted') createNotification();
-      }).catch(() => {});
-    }
-  }, [clientIdParam, params.id]);
+  // Auto-connect on mount
+  React.useEffect(() => {
+    dispatch({ type: 'SHOW_CALL_SCREEN' });
+    pendingConnectedSoundRef.current = true;
+    connectedSoundPlayedRef.current = false;
+    safeManualConnect();
+  }, [dispatch, safeManualConnect]);
 
   const triggerReportGeneration = React.useCallback(async () => {
     if (!params.id || !user?.uid || !clientIdParam) return;
     dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: true });
     
-    // Mark session as generating in localStorage with timestamp
     const generatingKey = `generating-report-${params.id}`;
     const timestamp = Date.now();
     localStorage.setItem(generatingKey, timestamp.toString());
     
-    // Redirect to sessions list page immediately
     router.replace(clientIdParam ? `/workspace/sessions/list?clientId=${clientIdParam}` : '/workspace/sessions/list');
     
     try {
@@ -480,8 +428,6 @@ export default function SessionDetail() {
             ReportKey: structured,
             is_report_done: true,
           });
-          await refetchReport();
-          notifyReportReady();
         }
       } else {
         console.warn('Report generation completed without usable result.', response);
@@ -489,41 +435,56 @@ export default function SessionDetail() {
     } catch (err) {
       addLog(LogLevel.Error, 'Failed to request report generation', err);
     } finally {
-      // Remove from localStorage when done (success or error)
       localStorage.removeItem(generatingKey);
       dispatch({ type: 'SET_IS_GENERATING_REPORT', payload: false });
     }
-  }, [apiClient, params.id, clientMeta?.city, clientMeta?.zipCode, user?.uid, clientIdParam, addLog, dispatch, refetchReport, notifyReportReady, router]);
+  }, [apiClient, params.id, clientMeta?.city, clientMeta?.zipCode, user?.uid, clientIdParam, addLog, dispatch, router]);
 
   return (
     <div className="flex flex-col h-screen max-w-6xl mx-auto p-4">
-      <div className="flex-shrink-0 flex justify-end items-center mb-4">
+      <div className="flex-shrink-0 flex justify-between items-center mb-4">
         <Button
-          className="w-auto md:w-auto gap-2 h-10 px-4 rounded-full shadow-xs"
-          variant="default"
+          className="w-auto gap-2 h-10 px-4 rounded-full shadow-xs"
+          variant="outline"
           onClick={() => router.replace(clientIdParam ? `/workspace/sessions/list?clientId=${clientIdParam}` : '/workspace/sessions/list')}
         >
           <PanelRightOpenSolid />
           Retour aux interactions
         </Button>
+        
+        <Button
+          className="w-auto gap-2 h-10 px-4 rounded-full shadow-xs"
+          variant="default"
+          disabled={uiState.isGeneratingReport}
+          onClick={triggerReportGeneration}
+        >
+          {uiState.isGeneratingReport ? (
+            <>
+              <Spinner variant="ellipsis" className="text-white" size={16} />
+              <span>Génération…</span>
+            </>
+          ) : (
+            <>
+              <BookmarkSolid />
+              <span>Finaliser l&apos;interaction</span>
+            </>
+          )}
+        </Button>
       </div>
 
-      {reportLoading ? (
-        <div className="text-sm text-muted-foreground">Chargement…</div>
-        ) : hasReport ? (
-        <ReportDisplay reportDetails={reportDetails} reportLoading={reportLoading} />
-      ) : (
+      {uiState.isGeneratingReport && (
+        <div ref={generatingOverlayRef} className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-[32px] bg-background/80 backdrop-blur-md">
+          <Spinner variant="ellipsis" className="text-white" size={48} />
+          <span className="text-sm text-muted-foreground">Génération du rapport en cours…</span>
+        </div>
+      )}
+
+      {!uiState.isCallScreen ? (
         <div className="relative mt-10 flex flex-col items-center justify-center gap-6 min-h-[220px]">
-          {uiState.isGeneratingReport && (
-            <div ref={generatingOverlayRef} className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-3 rounded-[32px] bg-background/80 backdrop-blur-md">
-              <Spinner variant="ellipsis" className="text-white" size={48} />
-              <span className="text-sm text-muted-foreground">Génération du rapport…</span>
-            </div>
-          )}
-          <p className={`text-sm text-muted-foreground text-center max-w-xl transition-opacity ${uiState.isGeneratingReport ? 'opacity-40' : 'opacity-100'}`}>
-            Aucun rapport n&apos;est disponible pour cette session. Si votre interaction est terminée, vous pouvez la finaliser. Sinon, lancez l&apos;interaction pour continuer en temps réel.
+          <p className="text-sm text-muted-foreground text-center max-w-xl">
+            Prêt à continuer l&apos;interaction en temps réel ? Lancez la session ou finalisez-la pour générer le rapport.
           </p>
-          <div className={`flex flex-col items-center gap-3 transition-opacity ${uiState.isGeneratingReport ? 'opacity-40' : 'opacity-100'}`} aria-hidden={uiState.isGeneratingReport}>
+          <div className="flex flex-col items-center gap-3">
             <Button
               size="lg"
               className="inline-flex items-center justify-center h-12 px-6 gap-2 rounded-full text-base"
@@ -534,76 +495,59 @@ export default function SessionDetail() {
                 safeManualConnect();
               }}
             >
-              <TelephoneSolid />
               <span>{uiState.isConnecting ? 'Connexion…' : "Lancer l'interaction"}</span>
-            </Button>
-            <Button
-              size="lg"
-              className="relative inline-flex items-center justify-center h-12 px-6 gap-2 rounded-full text-base"
-              disabled={uiState.isGeneratingReport}
-              onClick={triggerReportGeneration}
-            >
-              {uiState.isGeneratingReport && (
-                <span className="absolute inset-0 flex items-center justify-center">
-                  <Spinner variant="ellipsis" className="text-white" />
-                </span>
-              )}
-              <span className={uiState.isGeneratingReport ? 'opacity-0' : 'inline-flex items-center gap-2'}>
-                <BookmarkSolid />
-                <span>Finaliser l&apos;interaction</span>
-              </span>
             </Button>
           </div>
         </div>
-      )}
-
-      {uiState.isCallScreen && !hasReport && (
+      ) : (
         <CallScreen
-          inCall={wsStatus === WsStatus.Connected && !!uiState.serverReady}
-          isConnecting={uiState.isConnecting || wsStatus === WsStatus.Connecting}
-          isDisconnecting={uiState.isDisconnecting}
-          isStreamingOn={!!(uiState.isOnline && wsStatus === WsStatus.Connected && uiState.serverReady && uiState.isMicHwOn && uiState.isStreamingOn && uiState.serverAlive && !uiState.isThinking)}
-          disableStreaming={!uiState.isOnline || wsStatus !== WsStatus.Connected || !uiState.serverReady || !uiState.isMicHwOn}
-          level01={lastLevelRef.current}
-          onDisconnect={async () => {
-            dispatch({ type: 'SET_IS_DISCONNECTING', payload: true });
-            // Immediately stop mic and disable streaming to avoid any residual buffers
-            try { setStreamingEnabled(false); } catch {}
-            try { stopMic(); } catch {}
-            try { clearPlaybackQueue(); } catch {}
-            try { sendMessageRef.current({ event: 'client_disconnect', intent: 'manual' }); } catch {}
-            disconnectRef.current();
-            dispatch({ type: 'RESET_CALL_STATE' });
-            pendingConnectedSoundRef.current = false;
-            connectedSoundPlayedRef.current = false;
-          }}
-          onToggleStreaming={(next) => {
-            dispatch({ type: 'SET_STREAMING_ON', payload: next });
-            sessionMode.resetToIdle();
-          }}
-          isMicHwOn={uiState.isMicHwOn}
-          onToggleMicHardware={async (next) => {
-            try {
-              if (next) {
-                // Only allow mic hardware ON if WS is connected & server ready
-                if (wsStatusRef.current === WsStatus.Connected && serverReadyRef.current) {
-                  await startMic();
-                  dispatch({ type: 'SET_MIC_HW_ON', payload: true });
-                  dispatch({ type: 'SET_STREAMING_ON', payload: true });
-                } else {
-                  addLog(LogLevel.Ws, 'Cannot enable microphone - WS not ready');
-                  dispatch({ type: 'SET_MIC_HW_ON', payload: false });
-                  dispatch({ type: 'SET_STREAMING_ON', payload: false });
-                }
+        inCall={wsStatus === WsStatus.Connected && !!uiState.serverReady}
+        isConnecting={uiState.isConnecting || wsStatus === WsStatus.Connecting}
+        isDisconnecting={uiState.isDisconnecting}
+        isStreamingOn={!!(uiState.isOnline && wsStatus === WsStatus.Connected && uiState.serverReady && uiState.isMicHwOn && uiState.isStreamingOn && uiState.serverAlive && !uiState.isThinking)}
+        disableStreaming={!uiState.isOnline || wsStatus !== WsStatus.Connected || !uiState.serverReady || !uiState.isMicHwOn}
+        level01={lastLevelRef.current}
+        onDisconnect={async () => {
+          dispatch({ type: 'SET_IS_DISCONNECTING', payload: true });
+          try { setStreamingEnabled(false); } catch {}
+          try { stopMic(); } catch {}
+          try { clearPlaybackQueue(); } catch {}
+          try { sendMessageRef.current({ event: 'client_disconnect', intent: 'manual' }); } catch {}
+          disconnectRef.current();
+          dispatch({ type: 'RESET_CALL_STATE' });
+          pendingConnectedSoundRef.current = false;
+          connectedSoundPlayedRef.current = false;
+          
+          // Redirect back to session list
+          router.push(`/workspace/sessions/list?clientId=${clientIdParam}`);
+        }}
+        onToggleStreaming={(next) => {
+          dispatch({ type: 'SET_STREAMING_ON', payload: next });
+          sessionMode.resetToIdle();
+        }}
+        isMicHwOn={uiState.isMicHwOn}
+        onToggleMicHardware={async (next) => {
+          try {
+            if (next) {
+              if (wsStatusRef.current === WsStatus.Connected && serverReadyRef.current) {
+                await startMic();
+                dispatch({ type: 'SET_MIC_HW_ON', payload: true });
+                dispatch({ type: 'SET_STREAMING_ON', payload: true });
               } else {
-                stopMic();
+                addLog(LogLevel.Ws, 'Cannot enable microphone - WS not ready');
                 dispatch({ type: 'SET_MIC_HW_ON', payload: false });
                 dispatch({ type: 'SET_STREAMING_ON', payload: false });
               }
-            } catch {}
-          }}
-        />
+            } else {
+              stopMic();
+              dispatch({ type: 'SET_MIC_HW_ON', payload: false });
+              dispatch({ type: 'SET_STREAMING_ON', payload: false });
+            }
+          } catch {}
+        }}
+      />
       )}
     </div>
   );
 }
+
