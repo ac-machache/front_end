@@ -44,7 +44,7 @@ function NotesPageContent() {
       scheme: 'wss',
       host: '',
       port: '',
-      appName: process.env.NEXT_PUBLIC_APP_NAME || 'iAdvisor',
+      appName: process.env.NEXT_PUBLIC_APP_NAME || 'app',
       userId: user?.uid || '',
       sessionId: '', // Not needed for notes API
     },

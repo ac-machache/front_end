@@ -19,7 +19,6 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
-  SidebarTrigger,
   useSidebar,
 } from "@/components/ui/sidebar"
 import { Button } from "@/components/ui/button"
@@ -116,9 +115,8 @@ export function AppSidebar() {
   return (
     <>
       <SidebarHeader className="p-0 gap-0">
-        {/* Toggle Button + Logo - Fixed height to match navbar */}
+        {/* Logo - Fixed height to match navbar */}
         <div className="flex items-center gap-2 px-3 h-12 md:h-14">
-          <SidebarTrigger className="flex-shrink-0" />
           <div className="flex flex-col gap-0.5 min-w-0 group-data-[collapsible=icon]:hidden">
             <span className="text-base font-semibold truncate">IAdvisor</span>
             <span className="text-xs text-sidebar-foreground/70 truncate">Conseil agricole</span>

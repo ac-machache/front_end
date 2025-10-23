@@ -111,22 +111,25 @@ export function useVADRecorder({
     try {
       // Create MicVAD instance - load model from CDN, WASM files locally
       const vad = await MicVAD.new({
+        getStream: async () => {
+          return await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          })
+        },
         onSpeechStart: () => {
           console.log('Speech start detected')
           setIsSpeaking(true)
           audioChunksRef.current = []
-          
-          // Play Lock.mp3 to indicate recording started
-          if (lockAudioRef.current) {
-            lockAudioRef.current.currentTime = 0
-            lockAudioRef.current.play().catch(err => console.error('Error playing lock sound:', err))
-          }
         },
         onSpeechEnd: async (audio: Float32Array) => {
           console.log('Speech end detected', audio.length)
           setIsSpeaking(false)
 
-          // Play Unlock.mp3 to indicate recording ended
+          // Play Unlock.mp3 to indicate voice sent to be analyzed
           if (unlockAudioRef.current) {
             unlockAudioRef.current.currentTime = 0
             unlockAudioRef.current.play().catch(err => console.error('Error playing unlock sound:', err))
@@ -172,6 +175,12 @@ export function useVADRecorder({
 
       await vad.start()
       setIsListening(true)
+      
+      // Play Lock.mp3 to indicate user can start talking
+      if (lockAudioRef.current) {
+        lockAudioRef.current.currentTime = 0
+        lockAudioRef.current.play().catch(err => console.error('Error playing lock sound:', err))
+      }
     } catch (error) {
       console.error('Error starting VAD:', error)
       onError?.(error as Error)

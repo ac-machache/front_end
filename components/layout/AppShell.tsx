@@ -25,7 +25,7 @@ export function AppShell({ children }: AppShellProps) {
         </Sidebar>
         <SidebarInset>
           <div className="flex min-h-svh flex-col">
-            <AppNavbar />
+            <AppNavbar leading={<SidebarTrigger />} />
             <div className="flex-1 overflow-hidden">
               <main className="h-full overflow-y-auto p-4 md:p-6">
                 {children}
