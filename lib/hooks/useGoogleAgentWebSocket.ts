@@ -1,5 +1,12 @@
 /**
- * WebSocket hook to talk to backend Google agent (text chat).
+ * Hook to communicate with backend Google chat agent via HTTP POST.
+ * Replaces the previous WebSocket implementation with stateless HTTP requests.
+ * 
+ * Session Management:
+ * - Sessions have a 1-hour TTL with a sliding window (resets on each request)
+ * - Each message sent (sendMessage()) resets the TTL clock
+ * - If no activity for 1 hour, the session expires and is deleted from backend
+ * - Users who navigate away and return after 1h must start a new session
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
@@ -17,6 +24,10 @@ function makeId() {
   return `m_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function generateChatSessionId() {
+  return `chat_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export function useGoogleAgentWebSocket(clientId?: string) {
   const { user } = useAuth();
   const [status, setStatus] = useState<WsStatus>('disconnected');
@@ -24,8 +35,12 @@ export function useGoogleAgentWebSocket(clientId?: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const wsRef = useRef<WebSocket | null>(null);
   const clientIdRef = useRef(clientId);
+  const clientNameRef = useRef('');
+  // Session ID persists for the lifetime of this component
+  // Each new chat conversation gets a new session ID
+  // TTL of 1 hour with sliding window: resets on each POST request
+  const chatSessionIdRef = useRef(generateChatSessionId());
   
   // Update ref when clientId changes
   useEffect(() => {
@@ -33,134 +48,118 @@ export function useGoogleAgentWebSocket(clientId?: string) {
   }, [clientId]);
   
   const backendUrl = useMemo(() => {
-    const base = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8080';
-    // Convert http(s) -> ws(s)
-    try {
-      const u = new URL(base);
-      u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-      return `${u.toString().replace(/\/$/, '')}/google-agent/ws`;
-    } catch {
-      return `ws://localhost:8080/google-agent/ws`;
-    }
+    const base = process.env.NEXT_PUBLIC_BACKEND_BASE_URL || 'http://localhost:8080';
+    return base.replace(/\/$/, '');
   }, []);
 
-  const connect = useCallback(async () => {
+  // Initialize by fetching client name
+  useEffect(() => {
+    const initializeClient = async () => {
+      if (!user || !clientId) {
+        setStatus('disconnected');
+        return;
+      }
+      
+      try {
+        setStatus('connecting');
+        const c = await getClientById(user.uid, clientId);
+        if (c && typeof c.name === 'string') {
+          clientNameRef.current = c.name;
+        }
+        setStatus('connected');
+        setError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to initialize';
+        setError(message);
+        setStatus('error');
+      }
+    };
+
+    initializeClient();
+  }, [user, clientId]);
+
+  const sendMessage = useCallback(async (text: string) => {
+    if (!text.trim()) return;
+    
     if (!user) {
       setError('User not authenticated');
       return;
     }
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) return;
 
-    setStatus('connecting');
+    const cid = clientIdRef.current;
+    if (!cid) {
+      setError('No client selected');
+      return;
+    }
+
+    // Add user message locally immediately
+    setMessages((prev) => prev.concat({ id: makeId(), role: 'user', content: text }));
+    setIsThinking(true);
     setError(null);
-    // Prefetch client name to include in init payload
-    let clientName = '';
+
     try {
-      const cid = clientIdRef.current;
-      if (cid) {
-        const c = await getClientById(user.uid, cid);
-        if (c && typeof c.name === 'string') clientName = c.name;
-      }
-    } catch {}
+      const uid = user.uid;
+      const currentPath = `technico/${uid}/clients/${cid}`;
+      
+      // Construct the HTTP endpoint URL
+      const url = `${backendUrl}/apps/app/users/${uid}/sessions/${chatSessionIdRef.current}/chat`;
+      
+      // Build state dict matching backend expectations
+      const state = {
+        current_firestore_path: currentPath,
+        technician_name: user.displayName || user.email || 'Utilisateur',
+        farmer_name: clientNameRef.current || '',
+        text: text,
+      };
 
-    const url = `${backendUrl}?user_id=${encodeURIComponent(user.uid)}`;
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
+      // Make HTTP POST request
+      // This request resets the session TTL clock (sliding window)
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(state),
+      });
 
-    ws.onopen = () => {
-      setStatus('connected');
-      // Send initial payload with Firestore path and names
-      try {
-        const cid = clientIdRef.current;
-        const uid = user?.uid;
-        if (cid && uid) {
-          const currentPath = `technico/${uid}/clients/${cid}`;
-          ws.send(JSON.stringify({
-            event: 'init',
-            current_firestore_path: currentPath,
-            nom_tc: user?.displayName || user?.email || 'Utilisateur',
-            nom_agri: clientName || '',
-          }));
-        }
-      } catch {}
-    };
-    ws.onerror = () => {
-      setStatus('error');
-      setError('WebSocket error');
-    };
-    ws.onclose = () => setStatus('disconnected');
-    ws.onmessage = (ev) => {
-      try {
-        const data = JSON.parse(ev.data);
-        switch (data.event) {
-          case 'ready':
-            break;
-          case 'agent_thinking':
-            setIsThinking(true);
-            break;
-          case 'message': {
-            if (data.role === 'assistant' && data.text) {
-              setMessages((prev) => prev.concat({ id: makeId(), role: 'assistant', content: data.text }));
-              setIsThinking(false);
-            }
-            break;
-          }
-          case 'error':
-            setError(data.message || 'Unknown error');
-            setIsThinking(false);
-            break;
-          default:
-            break;
-        }
-      } catch (_e) {
-        // ignore
+      if (!response.ok) {
+        const errorData = await response.text();
+        throw new Error(`HTTP ${response.status}: ${errorData}`);
       }
-    };
+
+      const data = await response.json();
+      
+      // Add assistant response
+      // Backend returns { result: "..." } from run_agent method
+      if (data.result) {
+        setMessages((prev) => prev.concat({ 
+          id: makeId(), 
+          role: 'assistant', 
+          content: data.result 
+        }));
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Unknown error occurred';
+      setError(message);
+      console.error('Chat error:', err);
+    } finally {
+      setIsThinking(false);
+    }
   }, [backendUrl, user]);
 
   const disconnect = useCallback(() => {
-    const ws = wsRef.current;
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ event: 'disconnect' }));
-      ws.close(1000, 'User disconnected');
-    }
-    wsRef.current = null;
     setStatus('disconnected');
+    chatSessionIdRef.current = generateChatSessionId(); // Reset for next session
   }, []);
 
-  const sendMessage = useCallback((text: string) => {
-    if (!text.trim()) return;
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      setError('Not connected to agent');
-      return;
+  // Auto-connect when user available and clientId is set
+  useEffect(() => {
+    if (!user) {
+      setStatus('disconnected');
     }
-    // Append user message locally
-    setMessages((prev) => prev.concat({ id: makeId(), role: 'user', content: text }));
-    ws.send(JSON.stringify({ event: 'message', text }));
-    setIsThinking(true);
-  }, []);
+  }, [user]);
 
-  // Auto-connect when user available
-  useEffect(() => {
-    if (!user) return;
-    connect();
-    return () => disconnect();
-  }, [user, connect, disconnect]);
-
-  // Heartbeat
-  useEffect(() => {
-    const ws = wsRef.current;
-    if (!ws || status !== 'connected') return;
-    const id = setInterval(() => {
-      try {
-        ws.send(JSON.stringify({ event: 'heartbeat' }));
-      } catch {}
-    }, 30000);
-    return () => clearInterval(id);
-  }, [status]);
-
-  return { messages, sendMessage, status, isThinking, error, connect, disconnect } as const;
+  return { messages, sendMessage, status, isThinking, error, connect: () => {}, disconnect } as const;
 }
 
 
