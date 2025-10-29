@@ -179,18 +179,14 @@ function SessionsListPageInner() {
       const response = await apiClient.generateReport(sessionId, {
         ville: clientDoc?.city ?? null,
         zip_code: clientDoc?.zipCode ?? null,
-        current_document_path: `technico/${user.uid}/clients/${clientId}/sessions/${sessionId}`,
       });
 
-      if (response.ok && (response.value as { result?: unknown })?.result) {
-        const structured = (response.value as { result: unknown }).result as Record<string, unknown>;
-        if (structured && typeof structured === 'object' && 'main_report' in structured && 'strategic_dashboard' in structured) {
-          await updateClientSessionDoc(user.uid, clientId, sessionId, {
-            ReportKey: structured,
-            is_report_done: true,
-          });
-          void refreshSessions();
-        }
+      if (response.ok && response.value.success) {
+        // Backend already saved to Firestore - nothing more to do
+        void refreshSessions();
+      } else {
+        const errorMsg = response.ok ? response.value?.message : response.error?.message;
+        console.warn('Report generation failed.', errorMsg || response);
       }
     } catch (err) {
       console.error('Failed to generate report:', err);
@@ -316,7 +312,7 @@ function SessionsListPageInner() {
                                   e.stopPropagation();
                                   if (!user) return;
                                   try {
-                                    await apiClient.ingestSessionMemoryFor(s.id, true);
+                                    await apiClient.ingestSessionMemoryFor(s.id);
                                     await updateClientSessionDoc(user.uid, clientId, s.id, { saved: true });
                                     setFirestoreSessions(prev => prev.map(x => x.id === s.id ? { ...x, saved: true } : x));
                                     void refreshSessions();
@@ -353,7 +349,7 @@ function SessionsListPageInner() {
                             if (!user) return;
                             const ok = window.confirm('Supprimer cette interaction ?');
                             if (!ok) return;
-                            try { await apiClient.deleteSession(s.id); } catch {}
+                            try { await apiClient.deleteSession(clientId, s.id); } catch {}
                             try { await deleteClientSessionDoc(user.uid, clientId, s.id); } catch {}
                             void refreshSessions();
                           }}

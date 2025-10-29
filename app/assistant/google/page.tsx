@@ -22,7 +22,7 @@ import { Fragment, useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CopyIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ArrowLeftSolid } from '@mynaui/icons-react';
+import { ArrowLeftSolid, CheckCircleSolid, XCircleSolid } from '@mynaui/icons-react';
 import { Loader } from '@/components/ai-elements/loader';
 import { useGoogleAuth } from '@/lib/hooks/useGoogleAuth';
 import { useGoogleAgentWebSocket } from '@/lib/hooks/useGoogleAgentWebSocket';
@@ -31,17 +31,40 @@ const GoogleAssistantChat = () => {
   const router = useRouter();
   const searchParams = useSearchParams();
   const clientId = searchParams?.get('clientId') || '';
+  const oauthSuccess = searchParams?.get('oauth_success');
+  const oauthError = searchParams?.get('oauth_error');
   const [input, setInput] = useState('');
-  const { status: authStatus, loading: authLoading } = useGoogleAuth();
+  const [showOAuthMessage, setShowOAuthMessage] = useState(!!oauthSuccess || !!oauthError);
+  const { status: authStatus, loading: authLoading, checkStatus } = useGoogleAuth();
   const isAuthorized = !!authStatus?.is_connected;
   const { messages, sendMessage, status, isThinking, error, disconnect } = useGoogleAgentWebSocket(clientId);
 
+  // Handle OAuth callback results
+  useEffect(() => {
+    if (oauthSuccess === 'true') {
+      // Refresh auth status after successful OAuth
+      checkStatus();
+      // Clear message after 3 seconds
+      setTimeout(() => {
+        setShowOAuthMessage(false);
+        // Remove query params
+        router.replace('/assistant/google' + (clientId ? `?clientId=${clientId}` : ''));
+      }, 3000);
+    } else if (oauthError) {
+      // Keep error visible for 5 seconds
+      setTimeout(() => {
+        setShowOAuthMessage(false);
+        router.replace('/assistant/google' + (clientId ? `?clientId=${clientId}` : ''));
+      }, 5000);
+    }
+  }, [oauthSuccess, oauthError, checkStatus, router, clientId]);
+
   // Redirect to authorization page if not authorized
   useEffect(() => {
-    if (!authLoading && !isAuthorized) {
+    if (!authLoading && !isAuthorized && !showOAuthMessage) {
       router.push('/assistant/google/authorize');
     }
-  }, [authLoading, isAuthorized, router]);
+  }, [authLoading, isAuthorized, router, showOAuthMessage]);
 
   const handleSubmit = (message: PromptInputMessage) => {
     const hasText = Boolean(message.text);
@@ -80,6 +103,30 @@ const GoogleAssistantChat = () => {
 
   return (
     <div className="h-[calc(100vh-3rem)] md:h-[calc(100vh-3.5rem)] w-full flex flex-col">
+      {/* OAuth Message Alert */}
+      {showOAuthMessage && (
+        <div className="flex-shrink-0 border-b">
+          <div className="max-w-4xl mx-auto px-4 py-3">
+            {oauthSuccess === 'true' && (
+              <div className="flex items-center gap-3 p-3 bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-800 rounded-lg">
+                <CheckCircleSolid className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
+                <p className="text-sm text-green-700 dark:text-green-300">
+                  ✓ Google authorization successful! Redirecting...
+                </p>
+              </div>
+            )}
+            {oauthError && (
+              <div className="flex items-center gap-3 p-3 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-800 rounded-lg">
+                <XCircleSolid className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                <p className="text-sm text-red-700 dark:text-red-300">
+                  ✗ Authorization failed: {oauthError}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+      
       {/* Header avec bouton retour */}
       <div className="flex-shrink-0 border-b bg-background">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">

@@ -10,7 +10,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { getClientById } from '@/lib/firebase';
+import { getClientById, getFirebaseAuth } from '@/lib/firebase';
 
 export type WsStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
@@ -98,28 +98,33 @@ export function useGoogleAgentWebSocket(clientId?: string) {
     setError(null);
 
     try {
-      const uid = user.uid;
-      const currentPath = `technico/${uid}/clients/${cid}`;
+      // Get Firebase token for authentication
+      const auth = getFirebaseAuth();
+      const currentUser = auth?.currentUser;
+      const token = currentUser ? await currentUser.getIdToken() : null;
       
       // Construct the HTTP endpoint URL
-      const url = `${backendUrl}/apps/app/users/${uid}/sessions/${chatSessionIdRef.current}/chat`;
+      const url = `${backendUrl}/clients/${cid}/sessions/${chatSessionIdRef.current}/chat`;
       
-      // Build state dict matching backend expectations
-      const state = {
-        current_firestore_path: currentPath,
+      // Build request body (flattened, no current_firestore_path)
+      const body = {
+        text: text,
         technician_name: user.displayName || user.email || 'Utilisateur',
         farmer_name: clientNameRef.current || '',
-        text: text,
       };
+
+      // Build headers with auth token
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
 
       // Make HTTP POST request
       // This request resets the session TTL clock (sliding window)
       const response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(state),
+        headers,
+        body: JSON.stringify(body),
       });
 
       if (!response.ok) {

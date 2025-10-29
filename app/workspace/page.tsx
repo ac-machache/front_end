@@ -120,7 +120,7 @@ export default function WorkspacePage() {
           <Button
             size="default"
             className="inline-flex items-center justify-center h-10 px-5 gap-2 rounded-full text-sm"
-            onClick={() => router.push(selectedClientId ? `/assistant/google?clientId=${selectedClientId}` : '/assistant/google')}
+            onClick={() => router.push(selectedClientId ? `/assistant/google/authorize?clientId=${selectedClientId}` : '/assistant/google/authorize')}
             disabled={!selectedClientId || googleAuthLoading}
           >
             <BubblesSolid className="h-4 w-4" />

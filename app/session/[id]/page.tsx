@@ -468,23 +468,15 @@ export default function SessionDetail() {
       const response = await apiClient.generateReport(params.id as string, {
         ville: clientMeta?.city ?? null,
         zip_code: clientMeta?.zipCode ?? null,
-        current_document_path: `technico/${user.uid}/clients/${clientIdParam}/sessions/${params.id}`,
       });
 
-      if (response.ok && (response.value as { result?: unknown })?.result) {
-        const structured = (response.value as { result: unknown }).result as Record<string, unknown>;
-        if (!structured || typeof structured !== 'object' || !('main_report' in structured) || !('strategic_dashboard' in structured)) {
-          console.warn('Report payload missing expected keys.', structured);
-        } else {
-          await updateClientSessionDoc(user.uid, clientIdParam, params.id as string, {
-            ReportKey: structured,
-            is_report_done: true,
-          });
-          await refetchReport();
-          notifyReportReady();
-        }
+      if (response.ok && response.value.success) {
+        // Backend already saved to Firestore - nothing more to do
+        await refetchReport();
+        notifyReportReady();
       } else {
-        console.warn('Report generation completed without usable result.', response);
+        const errorMsg = response.ok ? response.value?.message : response.error?.message;
+        console.warn('Report generation failed.', errorMsg || response);
       }
     } catch (err) {
       addLog(LogLevel.Error, 'Failed to request report generation', err);

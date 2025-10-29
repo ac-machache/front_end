@@ -3,14 +3,25 @@ import { useCallback, useMemo } from 'react';
 import type { Config, Result, Session, SessionDetails } from '../types';
 import { LogLevel } from '../types';
 import { buildHttpUrl } from '../utils';
+import { getFirebaseAuth } from '../firebase';
 
 export function useApiClient(config: Config, addLog: (level: LogLevel, message: string, data?: unknown) => void) {
   const baseUrl = buildHttpUrl(config);
-  const performRequest = useCallback(async <T,>(method: 'GET' | 'POST', path: string, body?: unknown): Promise<Result<T>> => {
+  const performRequest = useCallback(async <T,>(method: 'GET' | 'POST' | 'DELETE', path: string, body?: unknown): Promise<Result<T>> => {
     const url = `${baseUrl}${path}`;
     addLog(LogLevel.Http, `${method} ${url}`, body);
     try {
-      const response = await fetch(url, { method, headers: { 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+      // Get Firebase token for authentication
+      const auth = getFirebaseAuth();
+      const currentUser = auth?.currentUser;
+      const token = currentUser ? await currentUser.getIdToken() : null;
+
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const response = await fetch(url, { method, headers, body: body ? JSON.stringify(body) : undefined });
       const text = await response.text();
       const data = text ? JSON.parse(text) : null;
       if (!response.ok) {
@@ -29,16 +40,16 @@ export function useApiClient(config: Config, addLog: (level: LogLevel, message: 
   }, [baseUrl, addLog]);
 
   return useMemo(() => ({
-    createSession: (initialState?: Record<string, unknown>) => performRequest<Session>('POST', `/apps/${config.appName}/users/${config.userId}/sessions`, initialState),
+    createSession: (clientId: string, initialState?: Record<string, unknown>) => performRequest<Session>('POST', `/clients/${clientId}/sessions`, { state: initialState }),
     createSessionWithId: (sessionId: string, initialState?: Record<string, unknown>) => performRequest<Session>('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`, initialState),
     listSessions: () => performRequest<Session[]>('GET', `/apps/${config.appName}/users/${config.userId}/sessions`),
     getSession: (sessionId: string) => performRequest<SessionDetails>('GET', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}`),
-    deleteSession: (sessionId: string) => performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/delete`),
-    ingestSessionMemoryFor: (sessionId: string, returnContext: boolean = false) =>
-      performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/ingest?return_context=${returnContext ? 'true' : 'false'}`),
+    deleteSession: (clientId: string, sessionId: string) => performRequest('DELETE', `/clients/${clientId}/sessions/${sessionId}`),
+    ingestSessionMemoryFor: (sessionId: string) =>
+      performRequest<{ success: boolean; status: string; session_id: string; message: string }>('POST', `/clients/${config.userId}/sessions/${sessionId}/memory`),
     generateReport: (sessionId: string, payload?: Record<string, unknown>) =>
-      performRequest('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/generate-report`, payload),
-    createNote: (sessionId: string, payload: { date_de_visite: string; audio_data: string }) =>
-      performRequest<{ result: string; data: string }>('POST', `/apps/${config.appName}/users/${config.userId}/sessions/${sessionId}/create-note`, payload),
+      performRequest<{ success: boolean; session_id: string; message: string }>('POST', `/clients/${config.userId}/sessions/${sessionId}/reports`, payload),
+    createNote: (clientId: string, payload: { audio_data: string; date_de_visite: string }) =>
+      performRequest<{ success: boolean; note_id: string; message: string }>('POST', `/clients/${clientId}/notes`, payload),
   }), [performRequest, config.appName, config.userId]);
 }

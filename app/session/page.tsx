@@ -250,7 +250,7 @@ function SessionsPageInner() {
         type_de_visite: sessionTypeData[sessionType]
       };
       addLog(LogLevel.Event, 'Creating session', payload);
-      const result = await apiClient.createSession(payload);
+      const result = await apiClient.createSession(clientId, payload);
       if (result.ok) {
         // Enregistrer la session dans Firestore sous le même ID (en arrière-plan)
         setClientSessionDoc(
@@ -420,7 +420,7 @@ function SessionsPageInner() {
                                 e.stopPropagation();
                                 if (!user) return;
                                 try {
-                                  await apiClient.ingestSessionMemoryFor(s.id, true);
+                                  await apiClient.ingestSessionMemoryFor(s.id);
                                   await updateClientSessionDoc(user.uid, clientId, s.id, { saved: true });
                                   // Update UI immediately
                                   setFirestoreSessions(prev => prev.map(x => x.id === s.id ? { ...x, saved: true } : x));
@@ -454,7 +454,7 @@ function SessionsPageInner() {
                               if (!user) return;
                               const ok = window.confirm('Supprimer cette interaction ?');
                               if (!ok) return;
-                              try { await apiClient.deleteSession(s.id); } catch {}
+                              try { await apiClient.deleteSession(clientId, s.id); } catch {}
                               try { await deleteClientSessionDoc(user.uid, clientId, s.id); } catch {}
                               void refreshSessions();
                             }}

@@ -3,6 +3,7 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { getFirebaseAuth } from '@/lib/firebase';
 
 interface GoogleAuthStatus {
   is_connected: boolean;
@@ -16,7 +17,7 @@ interface UseGoogleAuthResult {
   loading: boolean;
   error: string | null;
   checkStatus: () => Promise<void>;
-  initiateAuth: () => void;
+  initiateAuth: () => Promise<void>;
   disconnect: () => Promise<void>;
 }
 
@@ -40,12 +41,22 @@ export function useGoogleAuth(): UseGoogleAuthResult {
       setLoading(true);
       setError(null);
 
+      // Get Firebase token
+      const auth = getFirebaseAuth();
+      const currentUser = auth?.currentUser;
+      const token = currentUser ? await currentUser.getIdToken() : null;
+
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
       const response = await fetch(
-        `${backendUrl}/auth/google/status?user_id=${user.uid}`,
+        `${backendUrl}/auth/google/status`,
         {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
           },
         }
       );
@@ -78,18 +89,56 @@ export function useGoogleAuth(): UseGoogleAuthResult {
   }, [user, backendUrl]);
 
   // Initiate OAuth flow
-  const initiateAuth = useCallback(() => {
+  const initiateAuth = useCallback(async () => {
     if (!user) {
       setError('User not authenticated');
       return;
     }
 
-    // Store current URL to redirect back after auth
-    sessionStorage.setItem('google_auth_return_url', window.location.pathname);
+    try {
+      setError(null);
 
-    // Redirect to backend OAuth endpoint
-    const authUrl = `${backendUrl}/auth/google/authorize?user_id=${user.uid}`;
-    window.location.href = authUrl;
+      // Get Firebase token
+      const auth = getFirebaseAuth();
+      const currentUser = auth?.currentUser;
+      const token = currentUser ? await currentUser.getIdToken() : null;
+
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
+      // Store current URL to redirect back after auth
+      sessionStorage.setItem('google_auth_return_url', window.location.pathname);
+
+      // Request authorization URL from backend
+      const response = await fetch(
+        `${backendUrl}/auth/google/authorize`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to initiate OAuth');
+      }
+
+      const data = await response.json();
+      const authorizationUrl = data.authorization_url;
+
+      if (!authorizationUrl) {
+        throw new Error('No authorization URL received from backend');
+      }
+
+      // Redirect to Google OAuth consent screen
+      window.location.href = authorizationUrl;
+    } catch (err) {
+      console.error('Error initiating OAuth:', err);
+      setError(err instanceof Error ? err.message : 'Failed to initiate authorization');
+    }
   }, [user, backendUrl]);
 
   // Disconnect Google account
@@ -103,14 +152,23 @@ export function useGoogleAuth(): UseGoogleAuthResult {
       setLoading(true);
       setError(null);
 
+      // Get Firebase token
+      const auth = getFirebaseAuth();
+      const currentUser = auth?.currentUser;
+      const token = currentUser ? await currentUser.getIdToken() : null;
+
+      if (!token) {
+        throw new Error('Not authenticated');
+      }
+
       const response = await fetch(
         `${backendUrl}/auth/google/disconnect`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
           },
-          body: JSON.stringify({ user_id: user.uid }),
         }
       );
 

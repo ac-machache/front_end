@@ -100,41 +100,21 @@ function NotesPageContent() {
         }
       }
 
-      // Generate unique session ID for this note
-      const noteSessionId = crypto.randomUUID()
-
-      // Call backend to create note
-      const result = await apiClient.createNote(noteSessionId, {
-        date_de_visite: dateDeVisite,
+      // Call backend to create note (backend saves to Firestore automatically)
+      const result = await apiClient.createNote(clientId, {
         audio_data: base64,
+        date_de_visite: dateDeVisite,
       })
 
       if (!result.ok) {
         throw new Error('Failed to create note')
       }
 
-      if (result.value.result === 'success') {
-        const noteData = JSON.parse(result.value.data) as {
-          title: string
-          date_de_visite: string
-          date_de_creation: string
-          Content: string
-        }
-
-        // Save to Firestore with audio data
-        const noteId = crypto.randomUUID()
-        const notePayload: NotePayload = {
-          ...noteData,
-          audioData: base64,
-          sessionId: noteSessionId,
-        }
-
-        await setClientNoteDoc(user.uid, clientId, noteId, notePayload)
-
-        // Refresh notes list
+      if (result.value.success) {
+        // Backend already saved the note to Firestore, just refresh the list
         await fetchNotes()
       } else {
-        throw new Error('Backend returned failure')
+        throw new Error(`Backend error: ${result.value.message || 'Unknown error'}`)
       }
     } catch (error) {
       console.error('Error creating note:', error)

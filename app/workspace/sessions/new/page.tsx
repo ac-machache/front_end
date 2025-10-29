@@ -131,7 +131,7 @@ function NewSessionPageInner() {
       };
       
       addLog(LogLevel.Event, 'Creating session', payload);
-      const result = await apiClient.createSession(payload);
+      const result = await apiClient.createSession(clientId, payload);
       
       if (result.ok) {
         setClientSessionDoc(

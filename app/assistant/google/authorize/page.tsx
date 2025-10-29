@@ -1,24 +1,38 @@
 'use client';
 
-import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { ArrowLeftSolid, CalendarSolid } from '@mynaui/icons-react';
+import { ArrowLeftSolid, CalendarSolid, CheckCircleSolid } from '@mynaui/icons-react';
 import { Mail } from 'lucide-react';
 import { useGoogleAuth } from '@/lib/hooks/useGoogleAuth';
 import { Loader } from '@/components/ai-elements/loader';
 
 export default function GoogleAuthorizePage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const oauthSuccess = searchParams?.get('oauth_success');
+  const [showSuccess, setShowSuccess] = useState(false);
   const { status, loading, error, initiateAuth } = useGoogleAuth();
 
-  // Redirect to chat if already authorized
+  // Handle OAuth success callback
   useEffect(() => {
-    if (!loading && status?.is_connected) {
-      router.push('/assistant/google');
+    if (oauthSuccess === 'true') {
+      setShowSuccess(true);
+      // Redirect back to workspace after 2 seconds
+      setTimeout(() => {
+        router.replace('/workspace');
+      }, 2000);
     }
-  }, [loading, status, router]);
+  }, [oauthSuccess, router]);
+
+  // Redirect to workspace if already authorized
+  useEffect(() => {
+    if (!loading && status?.is_connected && !showSuccess) {
+      router.push('/workspace');
+    }
+  }, [loading, status, router, showSuccess]);
 
   if (loading) {
     return (
@@ -26,6 +40,23 @@ export default function GoogleAuthorizePage() {
         <div className="text-center">
           <Loader />
           <p className="mt-4 text-muted-foreground">Vérification des autorisations...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // Show success message
+  if (showSuccess) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-4">
+        <div className="text-center space-y-4">
+          <CheckCircleSolid className="h-16 w-16 text-green-500 mx-auto" />
+          <p className="text-lg font-semibold text-green-600 dark:text-green-400">
+            ✓ Autorisation réussie!
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Redirection vers l'accueil...
+          </p>
         </div>
       </div>
     );
