@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,7 +9,7 @@ import { Mail } from 'lucide-react';
 import { useGoogleAuth } from '@/lib/hooks/useGoogleAuth';
 import { Loader } from '@/components/ai-elements/loader';
 
-export default function GoogleAuthorizePage() {
+function GoogleAuthorizePageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const oauthSuccess = searchParams?.get('oauth_success');
@@ -55,7 +55,7 @@ export default function GoogleAuthorizePage() {
             ✓ Autorisation réussie!
           </p>
           <p className="text-sm text-muted-foreground">
-            Redirection vers l'accueil...
+            Redirection vers l&apos;accueil...
           </p>
         </div>
       </div>
@@ -144,6 +144,21 @@ export default function GoogleAuthorizePage() {
         </CardFooter>
       </Card>
     </div>
+  );
+}
+
+export default function GoogleAuthorizePage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <Loader />
+          <p className="mt-4 text-muted-foreground">Chargement...</p>
+        </div>
+      </div>
+    }>
+      <GoogleAuthorizePageContent />
+    </Suspense>
   );
 }
 
