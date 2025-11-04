@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import {
   ChevronDown,
   Users,
@@ -51,6 +51,8 @@ const mainNav: Array<{
 
 export function AppSidebar() {
   const pathname = usePathname()
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const { isMobile, setOpenMobile } = useSidebar()
   const { user } = useAuth()
   const [clients, setClients] = React.useState<ClientRecord[]>([])
@@ -71,6 +73,36 @@ export function AppSidebar() {
       localStorage.removeItem('selectedClientId')
     }
   }, [activeClientId])
+
+  // Auto-update URL when client selection changes on client-specific pages
+  React.useEffect(() => {
+    if (!activeClientId) return
+
+    // List of client-specific routes that need clientId in query params
+    const clientSpecificRoutes = [
+      '/workspace/sessions/new',
+      '/workspace/sessions/list',
+      '/workspace/notes',
+    ]
+
+    // Check if current pathname matches a client-specific route
+    const isClientSpecificRoute = clientSpecificRoutes.some(route => pathname === route)
+    
+    // Also check for dynamic routes (live sessions and reports)
+    const isLiveSessionRoute = pathname.startsWith('/workspace/sessions/live/')
+    const isReportRoute = pathname.startsWith('/workspace/sessions/report/')
+
+    if (isClientSpecificRoute || isLiveSessionRoute || isReportRoute) {
+      const currentClientId = searchParams?.get('clientId')
+      
+      // Only update if the clientId in URL is different from the selected one
+      if (currentClientId !== activeClientId) {
+        const params = new URLSearchParams(searchParams?.toString() || '')
+        params.set('clientId', activeClientId)
+        router.replace(`${pathname}?${params.toString()}`)
+      }
+    }
+  }, [activeClientId, pathname, router, searchParams])
 
   React.useEffect(() => {
     let mounted = true

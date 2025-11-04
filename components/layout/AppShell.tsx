@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { Suspense } from "react"
 
 import { AuthProvider } from "@/components/auth/AuthProvider"
 import AppNavbar from "@/components/layout/AppNavbar"
@@ -21,7 +22,9 @@ export function AppShell({ children }: AppShellProps) {
     <AuthProvider>
       <SidebarProvider>
         <Sidebar collapsible="icon">
-          <AppSidebar />
+          <Suspense fallback={null}>
+            <AppSidebar />
+          </Suspense>
         </Sidebar>
         <SidebarInset>
           <div className="flex min-h-svh flex-col">

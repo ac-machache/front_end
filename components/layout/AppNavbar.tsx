@@ -3,6 +3,7 @@ import React from "react"
 import Image from "next/image"
 import { Moon, Sun } from "lucide-react"
 import { LogoutSolid } from "@mynaui/icons-react"
+import { useRouter } from "next/navigation"
 
 import { Button } from "@/components/ui/button"
 import { useAuth } from "@/components/auth/AuthProvider"
@@ -14,8 +15,14 @@ type AppNavbarProps = {
 
 export default function AppNavbar({ leading, children }: AppNavbarProps) {
   const { user, signOut, loading } = useAuth();
+  const router = useRouter();
   const [mounted, setMounted] = React.useState(false);
   React.useEffect(() => { setMounted(true); }, []);
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push('/auth/signin');
+  };
 
   // Simple theme toggle (light/dark) using root .dark class
   const [theme, setTheme] = React.useState<'light' | 'dark'>(() => 'light');
@@ -66,7 +73,7 @@ export default function AppNavbar({ leading, children }: AppNavbarProps) {
                   {(user.displayName || user.email || 'U').slice(0, 1).toUpperCase()}
                 </div>
               )}
-              <Button onClick={signOut} className="h-8 px-3 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white">
+              <Button onClick={handleSignOut} className="h-8 px-3 gap-2 rounded-full bg-zinc-800 hover:bg-zinc-700 border-zinc-700 text-white">
                 <LogoutSolid />
                 Se déconnecter
               </Button>

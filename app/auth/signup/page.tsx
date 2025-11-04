@@ -20,7 +20,7 @@ export default function SignUpPage() {
 
   React.useEffect(() => {
     if (!loading && user) {
-      router.push('/clients');
+      router.push('/workspace');
     }
   }, [user, loading, router]);
 

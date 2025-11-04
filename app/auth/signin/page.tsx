@@ -18,7 +18,7 @@ export default function SignInPage() {
 
   React.useEffect(() => {
     if (!loading && user) {
-      router.push('/clients');
+      router.push('/workspace');
     }
   }, [user, loading, router]);
 
